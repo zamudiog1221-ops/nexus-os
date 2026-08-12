@@ -98,6 +98,24 @@ GitHub is now the pipe between the two machines — commit/push on PC 1, pull on
 
 Next: quick smoke-test of the features that had never actually run (notifications, run history, cost, agent handoff, model-picker persistence), then start Phase 1 / Linux prep.
 
+2026-08-12 (cont.) — Voice Notes overhaul + Calendar module (feature session)
+
+Did:
+
+Voice Notes reminder extraction: first as a manual "Find reminders" button, then per Gio's feedback made it fully automatic - on Save, the note is scanned and any tests/deadlines are auto-added to the real reminder list, no button. One model call now returns both the topic and the reminders.
+Made the Summarize button a big full-width CTA instead of a tiny link.
+Persistence: voice notes moved from useState to usePersistent ("voice-notes"), and summary/topic/reminders are stored on each note object - so notes, summaries and extracted reminders all survive restart.
+Auto-organize: notes group into day folders (Today / Yesterday / date), each tagged with an auto-detected topic badge (e.g. "Physics - Thermodynamics").
+New Calendar module (sidebar): month grid with reminder counts per day, click a day to see/add/edit/complete/delete its reminders, plus an Unscheduled list. Added resolveDue() to turn free-text due strings ("Friday", "next Tuesday", "Oct 3", "10/3", ISO) into real dates relative to when the reminder was made. Added updateReminder() to the shell so reminders are editable.
+
+Learned / noted:
+
+A lot of what Gio asked for (live capture, summarize) already existed - the real gaps were auto-add, persistence, organization, and a place to edit (the Calendar). Reading the existing module first saved building duplicates.
+Reminder due dates are free text, so the calendar needs a resolver; unresolvable ones fall into an Unscheduled bucket rather than being dropped.
+All JS verified via esbuild transform each step. Committed in two checkpoints (bcda575, b9ce4ce).
+
+Next: Stage 3 - audio recording + persistence + per-reminder replay. Needs MediaRecorder + timestamps + a Rust command to save/serve audio files, so it's the compile-heavy piece.
+
 Template
 ## YYYY-MM-DD — Short title (~Nh)
 
