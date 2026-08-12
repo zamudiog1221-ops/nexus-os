@@ -1,16 +1,14 @@
-// NEXUS OS — the bridge  [REFERENCE ONLY — nothing imports this file]
-// ---------------------------------------------------------------------------
+// NEXUS OS  -  the bridge  [REFERENCE ONLY  -  nothing imports this file]
 // Written during the mock-to-real migration as the single seam between the
 // React frontend and the Rust backend. In the end NexusCore.jsx grew its own
-// equivalents — RealShell, askClaude, usePersistent — and this file was never
+// equivalents  -  RealShell, askClaude, usePersistent  -  and this file was never
 // wired in.
 //
 // It is kept as a readable map of the Tauri command surface: which commands
 // exist, what they take, and what they return. Treat it as documentation, not
 // as live code. If you ever do import from here, check each function against
-// the version in NexusCore first — some have drifted (this file's TauriShell
+// the version in NexusCore first  -  some have drifted (this file's TauriShell
 // predates RealShell and handles cwd differently).
-// ---------------------------------------------------------------------------
 
 const inTauri = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
 
@@ -21,7 +19,6 @@ async function invoke(cmd, args) {
 
 export const IS_DESKTOP = inTauri;
 
-// ---- telemetry ------------------------------------------------------------
 // Drop-in for the body of useTelemetry's tick(). Returns the same field names
 // the mock produced, so the widgets are unchanged.
 
@@ -41,9 +38,8 @@ export async function readTelemetry() {
   };
 }
 
-// ---- shell ----------------------------------------------------------------
 // Replaces MockShell entirely. Same three members: label, detail, run().
-// The frontend's command parser is gone — the OS shell does the parsing now.
+// The frontend's command parser is gone  -  the OS shell does the parsing now.
 // `session.cwd` tracking stays in the frontend; we resolve cd ourselves.
 
 export const TauriShell = {
@@ -65,9 +61,8 @@ export const TauriShell = {
   },
 };
 
-// ---- networking -----------------------------------------------------------
 // Real DNS and ping. Device discovery and traceroute need a raw-socket crate
-// on the Rust side (surge-ping, pnet) — left as the mock until you add them,
+// on the Rust side (surge-ping, pnet)  -  left as the mock until you add them,
 // which is why MockNet stays imported for those two members.
 
 export async function resolveDns(host) {
@@ -83,7 +78,6 @@ export async function pingHost(host) {
   }
 }
 
-// ---- persistence ----------------------------------------------------------
 // The fix for "everything resets on reload". Call saveState whenever the user
 // changes settings / layout / projects / rules; call loadState on mount.
 
@@ -118,7 +112,6 @@ export function makePersistent(React) {
   };
 }
 
-// ---- model calls ----------------------------------------------------------
 // Replaces askClaude's fetch(). The request body is assembled exactly as
 // before, but it goes to the Rust process, which attaches the API key the
 // frontend never sees, and returns the raw response text to parse.

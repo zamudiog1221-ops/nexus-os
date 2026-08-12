@@ -1,0 +1,97 @@
+Work Log
+
+One entry per work session. Two minutes at the end of each session — date, hours, what got done, what broke, what was learned. This is the file that proves the process was real and sustained rather than a March cram.
+
+Be honest in here. "Spent 3 hours and got nowhere, cause was X" is more valuable than a clean narrative, both for grading and for you in February.
+
+2026-08-10 — Project scoping (planning session, ~1h)
+
+Did:
+
+Evaluated whether to continue NEXUS as the year-long class project or start something new. Concluded: neither cleanly — NEXUS has no finish line as a platform, so the graded project gets scoped to one module taken to measurable depth, with NEXUS/NexusOS as the container.
+Evaluated bootable-drive base OS. Linux over Windows, decisively. → DECISIONS.md 2026-08-10
+Established that the Linux port is the gate for the entire roadmap. Everything downstream (ISO, kiosk session, hardware integration) is straightforward once the binary runs on Linux; none of it is possible before.
+
+Learned:
+
+Windows To Go is dead (deprecated 10 1903, removed in 11). Ruled out the entire Windows-based approach before any time was spent on it.
+A live image's root is read-only squashfs — the ISO is a build artifact, not a dev environment. Editing code through the live drive means rebuilding the squashfs per change. This is why the ISO is Phase 5 and not Phase 1.
+
+Next: VM + toolchain, first Linux build attempt.
+
+2026-08-11 — Roadmap and estimation (planning session, ~1h)
+
+Did:
+
+Enumerated the full feature wishlist: Linux port, file converter, Gmail, debloat/file analyzer, wake-word assistant connected to all modules, cross-module timeline, local semantic search, ambient monitoring, comment cleanup, bootable NexusOS image.
+Estimated it at 330-535h ideal / 500-900h realistic unassisted — i.e. 1.5-2 school years against a ~450-550h budget. Revised to ~180-280h with heavy AI assistance, which fits.
+Reorganized into five phases with Phase 1 as foundation-only (platform abstraction, event bus, agent tool schema). Gmail and debloat deferred to Phase 6.
+Decided the agent tool schema gets designed in Phase 1 despite the router being Phase 3. → DECISIONS.md
+Kept code comments rather than stripping them. → DECISIONS.md
+Chose LAN companion over native mobile build for phone support. → DECISIONS.md
+Created CHECKLIST.md, PROJECT.md, ARCHITECTURE.md, DECISIONS.md, ROADMAP.md, LOG.md.
+
+Learned / noted:
+
+The wake word itself is the small part (~15h, openWakeWord or Porcupine). The other ~75h is the tool-routing layer that lets it actually invoke module capabilities. "Jarvis connected to everything" is an agent architecture problem, not a speech problem.
+Debloat is the highest-risk item on the list — a heuristic wrong 5% of the time across 40,000 files is 2,000 bad suggestions, and the failure mode is permanent data loss. Needs stage-don't-delete, 30-day undo, mandatory preview, and hard exclusions before any code.
+AI assistance collapses boilerplate and scaffolding but barely touches: hardware debugging, OAuth console work, wake-word threshold calibration, ISO boot failures, and real-use testing. Those are the bulk of the remaining hours.
+Identified own bottleneck risk: code can be generated faster than it can be read, and the failure mode is a month-four bug in three interacting systems that were never reviewed. Review time is budgeted as real time.
+
+Next: Phase 0.
+
+2026-08-11 — Session review and checklist consolidation (~1h)
+
+Did:
+
+Scrubbed all four local Cowork sessions (Local AI model setup, Nexus autonomous task execution, GhostMe/pentesting, AI SEO) plus pasted web chats to recover every open thread.
+Confirmed the repo has one commit (bb8a03e) and a folder of uncommitted changes — none of the last session's work (notifications, run history, cost tracking, agent handoff, idle timeout) has ever compiled.
+Confirmed we work off C:\Users\zamud\Desktop\nexus-os. No OneDrive duplicate.
+Saved LOG.md into the repo and rebuilt CHECKLIST.md around the five-phase roadmap.
+Wrote the missing planning docs into the repo: PROJECT.md, ARCHITECTURE.md, DECISIONS.md, ROADMAP.md — ARCHITECTURE.md read from the actual code (main.rs command surface, agent.rs, NexusCore.jsx modules).
+Dropped Hermes from the stack — local model is Ollama only. Kept ElevenLabs for voice. Scoped this repo to Nexus only; homelab and school project moved out of the checklist. → DECISIONS.md 2026-08-11
+
+Learned / noted:
+
+The planning docs from 2026-08-11 (CHECKLIST/PROJECT/ARCHITECTURE/DECISIONS/ROADMAP) were never written into this folder — only LOG.md and the checklist live here now. The rest still need to be created or moved in.
+The recorder module (cpal capture, WAV writer, artifact bus, Files drop) is a from-scratch build — no cpal/hound in Cargo, no Voice Notes module in the code yet.
+Transcription choice (local whisper-rs vs API) gates the recorder work — it decides installer size and whether the offline claim holds.
+
+Next: run npm run tauri dev to get the last session's Rust changes to compile, then commit.
+
+2026-08-11 — Transfer prep: quick fixes, port audit, scaffolding (~2h)
+
+Did:
+
+Wrote the four missing planning docs into the repo (PROJECT, ARCHITECTURE, DECISIONS, ROADMAP), ARCHITECTURE read from the real code.
+Three quick fixes (edit-only, compile tomorrow): assistant tool loop 5→10 on both the text and voice loops; text-chat reply cap 1000→2000 (voice stays short by design); model picker now persists via load_state/save_state under key "assistant-model".
+Port audit — mapped every OS-touching call to a table in ARCHITECTURE.md. Most already branch for Linux. Three real gaps: wifi_info (Windows-only netsh, needs nmcli/iw), arp_table (arp -a differs on Linux, prefer ip neigh), and hardcoded C:\ UI placeholder paths.
+Comment cleanup — found the codebase already clean (no narration comments, no emoji in comments, no console.log/println!/dbg!, no dead code). Did not manufacture churn. Kept the // ---- Section ---- markers as navigation.
+Second cleanup pass on the AI writing tells: stripped em/en dashes and smart quotes from ALL comments (110 comment lines across 8 files — 103 full-line + 7 trailing). Left them in user-facing UI strings on purpose (intentional product copy — the earlier established rule). All six JS files re-verified with esbuild transform after.
+Third pass — Gio flagged the ASCII banner blocks (/* ==== TITLE ==== */) as the biggest AI tell. Chose "nuke everything": removed all boxed banner blocks (titles AND bodies) and every ----/==== divider line. 376 lines gone across the codebase (295 from NexusCore.jsx). Anchored the removal on the ==== delimiter lines so it couldn't eat real code. Kept the plain prose why-comments. Backed up to /tmp first; re-verified all 8 JS files transform clean; new NexusCore is 12,379 lines (was 12,719).
+Phase 1 scaffolding: src/eventBus.js (dependency-free pub/sub, EVENTS map, ready for the Phase 2 artifact bus) and src-tauri/src/platform.rs (Os enum, current(), shell/opener helpers, and stub signatures for the three port gaps), wired via `mod platform;`. Non-behavior-changing.
+
+Broke / fought:
+
+esbuild in the sandbox was the win32 binary; installed a linux esbuild in /tmp to transform-check NexusCore.jsx. Passed.
+
+Learned / noted:
+
+The port is mostly done already — the earlier inline cfg! branching means Linux is a handful of gaps, not a rewrite. Good news for the Phase 1 timeline.
+Feature-behavior changes (actually implementing the Linux wifi/arp) intentionally deferred to when the VM exists — tonight stayed to skeletons and edits only.
+
+Next: on the school PC — npm run tauri dev (first real Rust compile, will check platform.rs + last session's changes), then commit and push.
+
+Template
+## YYYY-MM-DD — Short title (~Nh)
+
+**Did:**
+-
+
+**Broke / fought:**
+-
+
+**Learned:**
+-
+
+**Next:**

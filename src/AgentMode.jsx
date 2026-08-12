@@ -1,14 +1,12 @@
-// NEXUS OS — Agent Mode
-// ---------------------------------------------------------------------------
+// NEXUS OS  -  Agent Mode
 // The surface for the engine in agentEngine.js. Two states, really: a box you
 // paste a goal into, and a live record of what the agent is doing to your
-// machine. The record matters more than the box — the whole premise is that
+// machine. The record matters more than the box  -  the whole premise is that
 // you are not here while it works, so when you come back the log has to answer
 // "what did it do" without you having to reconstruct it.
 //
 // This component owns no run state. It subscribes to the engine singleton, so
 // leaving Agent Mode and coming back mid-run shows the run still going.
-// ---------------------------------------------------------------------------
 
 import React, { useState, useEffect, useRef } from "react";
 import {
@@ -21,13 +19,11 @@ import * as engine from "./agentEngine.js";
 // real headings, bold and tables instead of raw ** and | characters.
 import { MsgText } from "./NexusCore.jsx";
 
-// ---------------------------------------------------------------------------
 // plain language
-// ---------------------------------------------------------------------------
 // Simple view exists because the feed below is a developer's view of a run:
 // commands, exit codes, turn counts. Someone who just wants the job done needs
 // one sentence about what is happening now and a checklist showing how far in
-// it is. Nothing here changes what the agent does — only what gets shown.
+// it is. Nothing here changes what the agent does  -  only what gets shown.
 
 const FRIENDLY_STATUS = {
   planning: "Working out what to do",
@@ -356,7 +352,7 @@ function History({ onOpen }) {
 }
 
 /// A past run reopened from its journal. Read-only, and deliberately the
-/// technical feed — if you are digging up an old run you want the detail.
+/// technical feed  -  if you are digging up an old run you want the detail.
 function PastRun({ summary, onBack }) {
   const [rows, setRows] = useState(null);
 
@@ -413,7 +409,7 @@ function when(ts) {
 
 /* ----------------------------------------------------------- simple view */
 // What someone sees who does not want to read a terminal: one line for what is
-// happening now, a checklist for how far along it is, and — when it matters —
+// happening now, a checklist for how far along it is, and  -  when it matters  - 
 // the handoff card, which is the only thing on this screen they must act on.
 
 function SimpleView({ run, live, waiting, onRespond }) {
@@ -506,7 +502,7 @@ function SimpleView({ run, live, waiting, onRespond }) {
 
 /* --------------------------------------------------------------- handoff */
 // The run is parked in an unresolved promise while this is on screen. It stays
-// parked as long as it needs to — the budget clock is paused — so there is no
+// parked as long as it needs to  -  the budget clock is paused  -  so there is no
 // hurry and no penalty for wandering off mid-install.
 
 function Handoff({ req, onDone }) {

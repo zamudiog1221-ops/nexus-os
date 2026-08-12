@@ -1,9 +1,8 @@
-// NEXUS OS — autonomous agent engine
-// ---------------------------------------------------------------------------
+// NEXUS OS  -  autonomous agent engine
 // The assistant in NexusCore.jsx already has a tool loop, but it is built for
 // someone watching: five steps, then it stops and talks to you. This engine is
-// the opposite shape. You hand it a goal — a pasted walkthrough, a transcript,
-// a one-line instruction — and it keeps working until the job is done or it
+// the opposite shape. You hand it a goal  -  a pasted walkthrough, a transcript,
+// a one-line instruction  -  and it keeps working until the job is done or it
 // hits a wall it genuinely cannot get past.
 //
 // Three things make that possible, and they are the whole design:
@@ -19,7 +18,6 @@
 //
 //   3. It never asks. Every tool executes on sight. The only interruption is
 //      the stop button, and the only refusal is the guard in agent.rs.
-// ---------------------------------------------------------------------------
 
 const inTauri = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
 
@@ -29,15 +27,13 @@ function invoke(cmd, args) {
   return fn(cmd, args);
 }
 
-// ---------------------------------------------------------------------------
 // budgets
-// ---------------------------------------------------------------------------
 // Left generous, because the point is to finish the job, but finite, because
 // an agent stuck in a retry loop at 3am should eventually give up rather than
 // burn tokens until morning.
 
 export const DEFAULTS = {
-  maxSteps: 80,          // model turns, not commands — one turn can run several
+  maxSteps: 80,          // model turns, not commands  -  one turn can run several
   maxMinutes: 90,        // wall clock, excluding time spent waiting on the user
   commandTimeout: 3600,  // absolute ceiling per command
   commandQuiet: 120,     // kill a command after this long with no output at all
@@ -45,11 +41,9 @@ export const DEFAULTS = {
   model: "claude-sonnet-4-6",
 };
 
-// ---------------------------------------------------------------------------
 // what a run costs
-// ---------------------------------------------------------------------------
 // Dollars per million tokens, by model. Cache writes bill at 1.25x the input
-// rate and cache reads at 0.1x — which is the whole reason the system prompt
+// rate and cache reads at 0.1x  -  which is the whole reason the system prompt
 // and tool schemas are marked cacheable in the request below.
 //
 // These are list rates and Anthropic changes them; treat the figure on screen
@@ -58,8 +52,8 @@ export const DEFAULTS = {
 /// The models a run can use, cheapest first. One source of truth: the picker
 /// reads it, and so does the cost estimate.
 ///
-/// Most agent turns are mechanical — run a command, read the output, choose the
-/// next one — and a small model does that perfectly well for a fraction of the
+/// Most agent turns are mechanical  -  run a command, read the output, choose the
+/// next one  -  and a small model does that perfectly well for a fraction of the
 /// price. The tradeoff is real though: a weaker model misreads errors and burns
 /// turns recovering, so a job it can't handle can end up costing MORE than the
 /// expensive model would have. Cheap is the right default for routine work, not
@@ -117,9 +111,7 @@ export function fmtCost(dollars) {
 
 const EMPTY_USAGE = { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, calls: 0 };
 
-// ---------------------------------------------------------------------------
 // the tools the agent gets
-// ---------------------------------------------------------------------------
 
 const AGENT_TOOLS = [
   {
@@ -235,9 +227,7 @@ const AGENT_TOOLS = [
   },
 ];
 
-// ---------------------------------------------------------------------------
 // system prompt
-// ---------------------------------------------------------------------------
 
 function systemPrompt(env) {
   return [
@@ -274,9 +264,7 @@ function systemPrompt(env) {
     .join("\n\n");
 }
 
-// ---------------------------------------------------------------------------
 // the store
-// ---------------------------------------------------------------------------
 
 const listeners = new Set();
 
@@ -301,7 +289,7 @@ let state = {
 
 /// Resolver for the promise the run is parked on while `pending` is set.
 /// Module-level, like everything else here, so the wait survives the UI
-/// unmounting — you can leave Agent Mode, come back, and still answer it.
+/// unmounting  -  you can leave Agent Mode, come back, and still answer it.
 let pendingResolve = null;
 
 function set(patch) {
@@ -332,9 +320,7 @@ function push(entry) {
   return row;
 }
 
-// ---------------------------------------------------------------------------
 // live output streaming
-// ---------------------------------------------------------------------------
 
 let unlistenOutput = null;
 
@@ -343,15 +329,13 @@ async function attachStream() {
   unlistenOutput = await window.__TAURI__.event.listen("agent:output", (evt) => {
     const p = evt.payload;
     if (!p || p.run_id !== state.runId) return;
-    // Cap the live buffer — this is a viewport, not the record.
+    // Cap the live buffer  -  this is a viewport, not the record.
     const next = [...state.stream, { stream: p.stream, line: p.line }];
     set({ stream: next.length > 400 ? next.slice(-400) : next });
   });
 }
 
-// ---------------------------------------------------------------------------
 // model call
-// ---------------------------------------------------------------------------
 
 async function callModel(body, signal) {
   if (inTauri) {
@@ -368,19 +352,17 @@ async function callModel(body, signal) {
   return res.json();
 }
 
-// ---------------------------------------------------------------------------
 // context compaction
-// ---------------------------------------------------------------------------
 // Installer output is enormous and almost all of it stops mattering the moment
 // the next step succeeds. Once the transcript gets heavy we replace the bodies
-// of older tool results with a one-line stub. The structure stays valid — every
-// tool_use still has its tool_result — but the bulk goes away.
+// of older tool results with a one-line stub. The structure stays valid  -  every
+// tool_use still has its tool_result  -  but the bulk goes away.
 
 /// Keep the head and tail of a long output and drop the middle.
 ///
 /// The Rust side already caps each stream at 24k characters, but 24k of build
 /// spam is ~6k tokens, and every tool result stays in the transcript and is
-/// re-sent on every later turn — so one noisy command quietly taxes the whole
+/// re-sent on every later turn  -  so one noisy command quietly taxes the whole
 /// rest of the run. What matters is almost always the first lines (what it
 /// started doing) and the last (how it ended); the middle is progress bars.
 function middleTruncate(text, keep = 6000) {
@@ -399,7 +381,7 @@ function middleTruncate(text, keep = 6000) {
 /// forward and the previous prefix is read back at a tenth of the input rate.
 /// Only the newest exchange is ever billed as fresh.
 ///
-/// The copy is shallow but deliberate — the marker must not accumulate on old
+/// The copy is shallow but deliberate  -  the marker must not accumulate on old
 /// messages in `convo` itself, or every turn would carry stale breakpoints and
 /// blow past the four the API allows.
 function markConversationCache(convo) {
@@ -437,7 +419,7 @@ function weigh(convo) {
 /// That matters for more than tidiness: the prompt cache matches on an exact
 /// prefix. A sliding window that re-derives itself every turn produces a
 /// slightly different prefix every turn, which invalidates the cache on every
-/// single call — the transcript then bills at full rate for the entire run.
+/// single call  -  the transcript then bills at full rate for the entire run.
 /// Compacting once, permanently, keeps the prefix stable and cacheable.
 function compact(convo, budget) {
   if (weigh(convo) < budget) return convo;
@@ -465,16 +447,14 @@ function compact(convo, budget) {
   return out;
 }
 
-// ---------------------------------------------------------------------------
 // tool execution
-// ---------------------------------------------------------------------------
 
 async function execTool(name, input) {
   if (name === "set_plan") {
     const raw = input.steps || [];
 
     // Prompting alone doesn't reliably stop over-decomposition, so push back
-    // once at runtime. Only once — if the model insists the job really is that
+    // once at runtime. Only once  -  if the model insists the job really is that
     // big, it might be right, and arguing with it costs more than it saves.
     if (raw.length > 15 && !state.log.some((r) => r.kind === "replan")) {
       push({ kind: "replan", count: raw.length });
@@ -629,9 +609,7 @@ function updateLog(id, patch) {
   set({ log: state.log.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
 }
 
-// ---------------------------------------------------------------------------
 // the run
-// ---------------------------------------------------------------------------
 
 let abort = null;
 
@@ -708,10 +686,9 @@ export async function start(goal, opts = {}) {
 
       const trimmed = compact(convo, cfg.contextBudget);
 
-      // ---- caching -------------------------------------------------------
       // An agent loop re-sends the ENTIRE conversation on every turn. By turn
       // twenty the transcript dwarfs the system prompt, so caching only the
-      // static prefix barely helps — the transcript is the bill.
+      // static prefix barely helps  -  the transcript is the bill.
       //
       // Two breakpoints fix that. The first covers system + tools, which never
       // change. The second sits on the last block of the last message, so each
@@ -739,7 +716,7 @@ export async function start(goal, opts = {}) {
       if (abort.signal.aborted) return endRun("stopped", "Stopped by the user.");
 
       // Usage comes back on every response. Cache reads are counted separately
-      // from fresh input because they cost a tenth as much — without splitting
+      // from fresh input because they cost a tenth as much  -  without splitting
       // them the caching above would look like it did nothing.
       const u = data.usage || {};
       set({
@@ -829,7 +806,7 @@ function endRun(status, summary) {
 export async function stop() {
   abort?.abort();
 
-  // If the run is parked on a handoff, nothing is polling the abort signal —
+  // If the run is parked on a handoff, nothing is polling the abort signal  - 
   // the loop is sitting inside an unresolved promise. Wake it with null so it
   // can unwind instead of hanging there forever.
   if (pendingResolve) {
@@ -845,7 +822,7 @@ export async function stop() {
 }
 
 /// Called when the user says they've done the manual step. `text` is their
-/// optional reply — a version number, a path, whatever the agent asked to be
+/// optional reply  -  a version number, a path, whatever the agent asked to be
 /// read off the screen.
 export function respond(text) {
   if (!pendingResolve) return;
@@ -863,9 +840,7 @@ export function reset() {
   });
 }
 
-// ---------------------------------------------------------------------------
 // guard toggle + past runs
-// ---------------------------------------------------------------------------
 
 export async function guardEnabled() {
   try { return await invoke("agent_guard_enabled"); } catch { return true; }
@@ -880,7 +855,7 @@ export async function pastRuns() {
 }
 
 /// One row per past run for the history list: what it was asked to do, how it
-/// ended, and what it cost. Reads each journal, which is fine at this scale —
+/// ended, and what it cost. Reads each journal, which is fine at this scale  - 
 /// they are small append-only files and there are tens of them, not thousands.
 export async function pastRunSummaries(limit = 40) {
   const ids = await pastRuns();

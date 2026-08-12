@@ -15,24 +15,12 @@ import {
   Minus, Unlock, Info, Server, Code2, Boxes, Bot, Hand
 } from "lucide-react";
 import AgentMode from "./AgentMode.jsx";
-// Watching the agent for "finished" / "needs you" starts on import — the
+// Watching the agent for "finished" / "needs you" starts on import  -  the
 // module is a singleton, so it keeps running while you are on another screen.
 import { subscribeToast, dismissToast as dismissAgentToast } from "./agentNotify.js";
 // The assistant can hand long jobs to Agent Mode, and prices its own calls with
 // the same rate table the agent uses.
 import * as agentEngine from "./agentEngine.js";
-
-/* ============================================================
-   NEXUS OS — CORE SHELL + WIDGET ENGINE   (Milestones 1–2)
-
-   Three registries, three responsibilities:
-     MODULES        -> what appears in the sidebar
-     WIDGETS        -> what can appear on the dashboard
-     useTelemetry() -> the ONLY place data comes from
-
-   The Tauri backend will replace the body of useTelemetry().
-   No widget will need to change when that happens.
-   ============================================================ */
 
 const STATUS = {
   live:     { label: "Live",     tone: "var(--signal)" },
@@ -85,10 +73,6 @@ const MODULES = [
     capabilities: ["Theme", "Motion", "AI provider", "Privacy", "Module toggles"] },
 ];
 
-/* ============================================================
-   THE DATA SEAM — swap this for Tauri invoke() calls later
-   ============================================================ */
-
 function useTelemetry(demo, active) {
   const [t, setT] = useState(null);
   const [online, setOnline] = useState(
@@ -111,7 +95,7 @@ function useTelemetry(demo, active) {
   }, []);
 
   useEffect(() => {
-    // Content that isn't system telemetry — notifications, project list, etc.
+    // Content that isn't system telemetry  -  notifications, project list, etc.
     // These stay sample data until their own modules are wired; the dashboard
     // widgets that show them are unrelated to whether CPU is real.
     const dashExtras = {
@@ -128,7 +112,6 @@ function useTelemetry(demo, active) {
     };
     const KEEP = 28;
 
-    // ---- REAL PATH: poll the Rust backend ----
     if (isDesktop) {
       let alive = true;
       const tick = async () => {
@@ -158,7 +141,6 @@ function useTelemetry(demo, active) {
       return () => { alive = false; clearInterval(iv); };
     }
 
-    // ---- BROWSER PATH: synthetic wave for development ----
     if (!demo) { hist.current = { down: [], cpu: [] }; setT(null); return; }
     const wave = (base, amp, speed, phase = 0) => (now) =>
       Math.max(1, Math.min(99, base + Math.sin(now / speed + phase) * amp));
@@ -188,10 +170,6 @@ function useTelemetry(demo, active) {
 
   return { t, online };
 }
-
-/* ============================================================
-   PRIMITIVES
-   ============================================================ */
 
 function Frame({ w, children }) {
   const Icon = w.icon;
@@ -242,10 +220,6 @@ function Spark({ series, tone = "var(--signal)" }) {
   );
 }
 
-/* ============================================================
-   WIDGET BODIES
-   ============================================================ */
-
 function ClockBody() {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
@@ -284,7 +258,7 @@ function NetBody({ t }) {
   );
 }
 
-/* Notifications built entirely from real app state — no canned messages.
+/* Notifications built entirely from real app state  -  no canned messages.
    Sources: reminders you've added, live system load, and connectivity. */
 function NotifBody({ ctx }) {
   const t = ctx?.t;
@@ -424,15 +398,6 @@ function CoreRing({ active, onSelect }) {
   );
 }
 
-/* ============================================================
-   WEATHER
-
-   Real current conditions from Open-Meteo via the Rust backend.
-   Location comes from the webview's geolocation; if that's denied
-   or unavailable it falls back to a default and says so. Refreshes
-   every 15 minutes.
-   ============================================================ */
-
 function WeatherBody() {
   const [wx, setWx] = useState(null);
   const [state, setState] = useState("loading"); // loading | ok | error
@@ -482,15 +447,6 @@ function WeatherBody() {
     </>
   );
 }
-
-/* ============================================================
-   QUICK LAUNCH
-
-   Real app/URL launching through the Rust backend. Each entry is a
-   label plus a target: an app name on PATH (code, firefox), a full
-   path, or a URL. The list persists. In the browser it just toasts,
-   since there's no OS to launch into.
-   ============================================================ */
 
 const LAUNCH_DEFAULTS = [
   { id: 1, label: "VS Code", target: "code" },
@@ -594,15 +550,6 @@ function LaunchBody({ ctx }) {
     </div>
   );
 }
-
-/* ============================================================
-   ASSISTANT ACTIONS
-
-   The tools the assistant can call to actually do things. Each has
-   a schema the model sees, and a run() the app executes against
-   real module state. Side-effectful actions happen immediately but
-   are always confirmed back to the user in the reply.
-   ============================================================ */
 
 const ASSISTANT_TOOLS = [
   {
@@ -821,7 +768,6 @@ async function runAssistantTool(name, input, ctx) {
   const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
   const inv = (cmd, args) => (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke)(cmd, args);
   try {
-    // ---- read tools -------------------------------------------------------
     if (name === "get_weather") {
       if (!isDesktop) return "Weather needs the desktop app.";
       const coords = await new Promise((res) => {
@@ -886,8 +832,6 @@ async function runAssistantTool(name, input, ctx) {
       if (!apps.length) return "No Quick Launch apps saved yet.";
       return "Saved apps: " + apps.map((a) => a.label).join(", ") + ".";
     }
-
-    // ---- action tools -----------------------------------------------------
 
     if (name === "set_setting") {
       const key = String(input.setting || "").toLowerCase();
@@ -983,7 +927,7 @@ async function runAssistantTool(name, input, ctx) {
       }
 
       // 3) Otherwise it's just a bare name with no saved app. Don't guess a
-      // URL silently — tell the model so it can ask the user what they meant.
+      // URL silently  -  tell the model so it can ask the user what they meant.
       return `NO_MATCH: "${want}" isn't in the user's Quick Launch apps, and isn't a URL or file path. Ask them whether they want to open it in the browser (and what URL) or add it to Quick Launch with its .exe path. Do not guess a URL yourself.`;
     }
     if (name === "complete_reminder") {
@@ -1027,7 +971,6 @@ async function runAssistantTool(name, input, ctx) {
       }));
       return `${visible ? "Showing" : "Hiding"} the ${id} module.`;
     }
-    // ---- doing things on the machine --------------------------------------
     // A quick lookup runs here and answers in the same breath. Real work goes
     // to Agent Mode, which has the plan/verify/handoff loop this doesn't.
 
@@ -1038,7 +981,7 @@ async function runAssistantTool(name, input, ctx) {
       try {
         // Routed through agent_exec rather than run_shell so the same
         // destructive-command guard that protects Agent Mode also applies
-        // here — otherwise this tool would be the way around it.
+        // here  -  otherwise this tool would be the way around it.
         const res = await inv("agent_exec", {
           runId: "assistant",
           cmd,
@@ -1109,10 +1052,6 @@ async function runAssistantTool(name, input, ctx) {
   }
 }
 
-/* ============================================================
-   WIDGET REGISTRY   sm 1x1 · md 2x1 · tall 1x2 · lg 2x3
-   ============================================================ */
-
 const WIDGETS = [
   { id: "clock", title: "Local time", icon: Clock, size: "sm",
     render: () => <ClockBody /> },
@@ -1148,7 +1087,7 @@ const WIDGETS = [
     render: ({ t }) => {
       if (!t) return <Blank />;
       // Real score: start at 100, subtract for genuinely high load on each
-      // real metric. No fixed number — it moves with the machine.
+      // real metric. No fixed number  -  it moves with the machine.
       const over = (v, soft, hard) => v <= soft ? 0 : Math.min(1, (v - soft) / (hard - soft));
       const penalty = Math.round(
         over(t.cpu, 70, 100) * 22 + over(t.mem, 80, 100) * 22 +
@@ -1221,14 +1160,6 @@ const DEFAULT_LAYOUT = [
   { id: "tasks", size: "tall" }, { id: "quickchat", size: "xl" },
   { id: "launch", size: "md" }, { id: "calendar", size: "xl" },
 ];
-
-/* ============================================================
-   GRID ENGINE
-
-   Only widgets listed in LIVE_WIDGETS re-render on a telemetry
-   tick. The clock, calendar, task list and core map are isolated
-   from it entirely, so a 1.2s poll touches 6 cells instead of 13.
-   ============================================================ */
 
 const SIZE_ORDER = ["sm", "md", "tall", "xl", "lg", "hero", "mega"];
 const SIZE_LABEL = { sm: "1×1", md: "2×1", tall: "1×2", xl: "2×2", lg: "2×3", hero: "3×3", mega: "4×4" };
@@ -1319,7 +1250,7 @@ const ORBIT = [
 ];
 
 function OrbitDashboard({ ctx, layout }) {
-  // The orbit has fixed frame positions (a–l + core). Any widget present in
+  // The orbit has fixed frame positions (a-l + core). Any widget present in
   // the saved layout AND assigned a slot renders in the frame. Widgets the
   // user added that don't have a slot flow into a row beneath the orbit, so
   // adding a widget in Rearrange actually shows up here.
@@ -1436,10 +1367,6 @@ function AddTray({ layout, setLayout }) {
   );
 }
 
-/* ============================================================
-   MODULE PLACEHOLDER
-   ============================================================ */
-
 function ModuleView({ mod }) {
   const Icon = mod.icon;
   return (
@@ -1465,14 +1392,6 @@ function ModuleView({ mod }) {
     </div>
   );
 }
-
-/* ============================================================
-   AI ASSISTANT MODULE
-
-   The first module with a real engine. It receives the same ctx
-   every widget gets, so it can answer questions about live
-   telemetry without any special wiring.
-   ============================================================ */
 
 const SUGGESTIONS = [
   "Remind me I have a math test Thursday",
@@ -1592,12 +1511,12 @@ export function MsgText({ text }) {
     const chunks = part.split(/\$\$([\s\S]*?)\$\$/);
     return chunks.map((chunk, ci) => {
       const key = `${i}-${ci}`;
-      // Odd chunks are the math between $$ … $$.
+      // Odd chunks are the math between $$ ... $$.
       if (ci % 2 === 1) {
         const boxed = /\\boxed/.test(chunk);
         return <div key={key} className={`nx-math${boxed ? " nx-math-boxed" : ""}`}>{renderMath(chunk)}</div>;
       }
-      // Even chunks are normal prose — headers, bold, bullets, tables and
+      // Even chunks are normal prose  -  headers, bold, bullets, tables and
       // inline math. Walked with an index rather than mapped, because a table
       // spans several lines and has to be consumed as a single unit.
       const lines = chunk.split("\n");
@@ -1710,7 +1629,7 @@ function AssistantModel() {
 }
 
 /// What this conversation has cost so far. Session-only and deliberately
-/// understated — it is here so a runaway loop is visible, not to make anyone
+/// understated  -  it is here so a runaway loop is visible, not to make anyone
 /// anxious about pennies.
 function SessionMeter() {
   const [usage, setUsage] = useState(Meter.get());
@@ -1808,8 +1727,9 @@ function AssistantView({ ctx }) {
 
     try {
       // Tool loop: keep going while the model asks to call tools, capped so a
-      // misbehaving model can't spin forever.
-      for (let step = 0; step < 5; step++) {
+      // misbehaving model can't spin forever. 10 rounds: now that the assistant
+      // can run commands and delegate, 5 ran out mid-task.
+      for (let step = 0; step < 10; step++) {
         if (ac.signal.aborted) return; // user hit stop
         const data = await askClaude({
           system: buildSystemPrompt(t, online, ctx.launchApps),
@@ -1817,6 +1737,7 @@ function AssistantView({ ctx }) {
           tools: ASSISTANT_TOOLS,
           signal: ac.signal,
           raw: true,
+          maxTokens: 2000, // was the 1000 default, which truncated long answers mid-sentence
         });
         if (ac.signal.aborted) return; // stopped while the request was in flight
 
@@ -1971,15 +1892,6 @@ function AssistantView({ ctx }) {
     </div>
   );
 }
-
-/* ============================================================
-   CYBERSECURITY MODULE
-
-   Three tools, all real, none needing a backend:
-     Hash forge  -> Web Crypto SubtleCrypto.digest
-     Cipher bench-> pure JS transforms
-     Scan reader -> parses genuine nmap console output
-   ============================================================ */
 
 function CopyBtn({ value }) {
   const [state, setState] = useState("idle");
@@ -2616,7 +2528,7 @@ function EntropyMeter() {
   );
 }
 
-// Cyber Twin — records a baseline snapshot of the machine, then on later checks
+// Cyber Twin  -  records a baseline snapshot of the machine, then on later checks
 // flags only what's genuinely changed (new listening ports, processes using far
 // more memory than before, big jumps in process count). Speaks up ONLY when
 // something's worth looking at; stays quiet when all is normal. Fully local.
@@ -2683,7 +2595,7 @@ function CyberTwin({ ctx }) {
       if (speak && f.length && ctx.settings?.voiceSpeak) {
         const worst = f.find((x) => x.sev === "high") || f[0];
         const intro = f.length === 1 ? "One thing on your system looks unusual. " : `${f.length} things on your system look unusual. `;
-        // Through the queue, not straight to the voice — the local `speak`
+        // Through the queue, not straight to the voice  -  the local `speak`
         // parameter shadows the global helper here, so call Speech directly.
         Speech.say(intro + worst.text, ctx.settings?.voiceGender, "reply").catch(() => {});
       }
@@ -2806,20 +2718,6 @@ function SecurityView({ ctx }) {
   );
 }
 
-/* ============================================================
-   SHARED ENGINE CALL
-   One place both the assistant and the terminal reach the model.
-   ============================================================ */
-
-/* ============================================================
-   SOUND ENGINE
-
-   Synthesizes every effect with the Web Audio API — no files, no
-   loading, nothing to ship. A single shared AudioContext, created
-   lazily on first interaction because browsers block audio until
-   the user has clicked. Muted by default; the setting turns it on.
-   ============================================================ */
-
 const Sound = (() => {
   let ctx = null;
   let enabled = false;
@@ -2876,19 +2774,6 @@ const Sound = (() => {
   };
 })();
 
-/* ============================================================
-   USAGE METER
-
-   Every model call in the app funnels through askClaude, so this
-   is the one place that sees all of them. Kept module-level rather
-   than in React state because the terminal, the voice ring and the
-   chat all make calls, and none of them owns the others.
-
-   Session-only: it answers "what has this conversation cost me",
-   not "what has this month cost me". Anthropic's dashboard is the
-   authority on billing; this is for noticing a runaway loop.
-   ============================================================ */
-
 const Meter = (() => {
   const zero = () => ({ input: 0, output: 0, cacheWrite: 0, cacheRead: 0, calls: 0 });
   let usage = zero();
@@ -2917,13 +2802,31 @@ const Meter = (() => {
 
 /// Which model the assistant and voice use. Module-level rather than React
 /// state because askClaude is called from the chat, the voice ring and several
-/// modules, none of which own the others — same reason the meter lives here.
+/// modules, none of which own the others  -  same reason the meter lives here.
 let assistantModel = agentEngine.DEFAULTS.model;
 const modelSubs = new Set();
+const MODEL_STATE_KEY = "assistant-model";
+
+function modelInvoke(cmd, args) {
+  const fn = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+  return fn ? fn(cmd, args) : Promise.reject(new Error("not desktop"));
+}
+
+// Restore the last-picked model on startup so it survives a restart. Fire and
+// forget  -  if it fails or we're in the browser, we keep the default.
+modelInvoke("load_state", { key: MODEL_STATE_KEY })
+  .then((raw) => {
+    const id = JSON.parse(raw);
+    if (id && typeof id === "string") setAssistantModel(id);
+  })
+  .catch(() => { /* absent, corrupt, or browser — keep default */ });
 
 function setAssistantModel(id) {
   assistantModel = id;
   modelSubs.forEach((fn) => { try { fn(id); } catch { /* ignore */ } });
+  // Persist so the choice outlives the session.
+  modelInvoke("save_state", { key: MODEL_STATE_KEY, value: JSON.stringify(id) })
+    .catch(() => {});
 }
 function subscribeAssistantModel(fn) {
   modelSubs.add(fn);
@@ -2989,21 +2892,6 @@ async function askClaude({ system, messages, signal, tools, maxTokens, raw, mode
     .join("\n")
     .trim();
 }
-
-/* ============================================================
-   TERMINAL MODULE
-
-   The shell sits behind an adapter with three members:
-
-     label   -> what the status bar shows
-     detail  -> the honesty note in the UI
-     run(input, session) -> { lines, cwd?, exit }
-
-   RealShell runs actual commands through Tauri and is what the
-   desktop app uses. MockShell is an in-memory stand-in so the
-   module still works in a browser dev server, where there is no
-   process to spawn.
-   ============================================================ */
 
 const seedFs = () => ({
   type: "dir",
@@ -3311,7 +3199,6 @@ function TerminalView() {
     const emit = (text, kind = "out") =>
       setLines((l) => [...l, ...String(text).split("\n").map((t) => ({ kind, text: t }))]);
 
-    // ---- saved commands (aliases), handled locally ----
     // `save <name> <command...>`  → store
     // `saved` / `save`            → list
     // `unsave <name>`             → remove
@@ -3530,19 +3417,6 @@ function TerminalView() {
   );
 }
 
-/* ============================================================
-   NETWORKING MODULE
-
-   Behind one adapter. MockNet fabricates plausible results;
-   TauriNet will implement the same members over real sockets:
-
-     overview()            -> interface + router facts
-     scan(onDevice, alive) -> progressive ARP-style discovery
-     ping(host)            -> ms, or null for a dropped probe
-     resolve(name, type)    -> DNS answers
-     trace(host, onHop, alive) -> hop-by-hop path
-   ============================================================ */
-
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const jitter = (base, spread) => Math.max(0.4, base + (Math.random() - 0.5) * spread);
 
@@ -3609,14 +3483,14 @@ const MockNet = {
     }
   },
 
-  // Real ping on desktop. Returns ms, or null for a dropped/failed probe —
+  // Real ping on desktop. Returns ms, or null for a dropped/failed probe  - 
   // same contract the mock used, so the latency graph is unchanged.
   async ping(host) {
     if (IS_DESKTOP && !SchoolLock.on) {
       try { return await tauriInvoke("ping_host", { host }); }
       catch { return null; }
     }
-    // School mode (or browser): no real ICMP probe — synthesize instead.
+    // School mode (or browser): no real ICMP probe  -  synthesize instead.
     if (Math.random() < 0.04) return null;
     const base = host === "192.168.1.1" || host === "router.lan" ? 1.3 : 18;
     return +jitter(base, base * 0.7).toFixed(1);
@@ -3755,7 +3629,7 @@ function NetDevices() {
         setDevices(rows);
         setScanning(false); setDone(true);
 
-        // Background hostname resolution — one IP at a time so it's gentle,
+        // Background hostname resolution  -  one IP at a time so it's gentle,
         // updating each row as its name (or blank) comes back.
         for (const d of rows) {
           if (!aliveRef.current) return;
@@ -4222,7 +4096,7 @@ const NET_TABS = [
 
 function NetworkView({ ctx }) {
   const schoolMode = ctx.settings?.schoolMode;
-  // In school mode, everything that touches the network disappears — only the
+  // In school mode, everything that touches the network disappears  -  only the
   // static Ports reference (no network activity at all) remains.
   const tabs = NET_TABS.filter((x) => !(schoolMode && x.probe));
   const [tab, setTab] = useState(tabs[0].id);
@@ -4249,19 +4123,6 @@ function NetworkView({ ctx }) {
     </div>
   );
 }
-
-/* ============================================================
-   PROJECTS MODULE
-
-   MockRepo stands in for real git plumbing. TauriRepo will
-   implement the same members against libgit2 / the git CLI:
-
-     list()                  -> tracked repositories
-     status(id)              -> branch, ahead/behind, dirty paths
-     commits(id) / files(id) -> history and working tree
-
-   Task and note mutations are local until persistence exists.
-   ============================================================ */
 
 const PROJECT_SEED_RAW = [
   {
@@ -4814,7 +4675,6 @@ function ProjectsView({ ctx }) {
   const [mode, setMode] = useState(null);   // null | "create" | "edit"
   const [confirmDrop, setConfirmDrop] = useState(false);
 
-
   const project = projects.find((p) => p.id === sel) || null;
 
   // Live git data for the selected project, if it points at a real repo.
@@ -5039,19 +4899,6 @@ function ProjectsView({ ctx }) {
   );
 }
 
-/* ============================================================
-   FILES MODULE
-
-   MockFiles stands in for the filesystem index. TauriFiles will
-   implement the same two members over real directory walking:
-
-     list()            -> indexed entries with metadata
-     read(path)        -> text content for previewable types
-
-   Summaries are real model calls against whatever text we hold,
-   so this feature works identically once the index is real.
-   ============================================================ */
-
 const FILE_SEED_RAW = [
   {
     id: "f1", name: "milestone-2-notes.md", path: "Documents/nexus", type: "md",
@@ -5077,7 +4924,6 @@ Reminder: static widgets must not re-render on a telemetry tick. Clock and calen
     body: `import psutil
 import time
 
-
 def snapshot():
     """Return a single reading of the things the dashboard cares about."""
     return {
@@ -5085,7 +4931,6 @@ def snapshot():
         "mem": psutil.virtual_memory().percent,
         "disk": psutil.disk_usage("/").percent,
     }
-
 
 if __name__ == "__main__":
     while True:
@@ -5160,7 +5005,7 @@ Lesson: when a forensics challenge hands you a capture that looks empty, the dat
     body: `// The shell lives behind an adapter with three members:
 //   label, detail, run(input, session)
 // MockShell simulates a session in memory. TauriShell will spawn a
-// real process. Nothing in the UI references either one directly —
+// real process. Nothing in the UI references either one directly  - 
 // it reads whichever object is assigned to \`shell\`.
 //
 // This is the whole point of the adapter: swapping the backend is a
@@ -5548,18 +5393,6 @@ function FilesView({ ctx }) {
   );
 }
 
-/* ============================================================
-   HOMEWORK HELPER
-
-   Real vision call. Images are downscaled to 1568px on the long
-   edge before upload — that is the point past which the model
-   gains nothing and you just pay for pixels.
-
-   Four modes, none of which produce a submittable answer. This is
-   deliberate: a tool that hands over finished work is useless on
-   the exam, where nobody is holding a phone over the page.
-   ============================================================ */
-
 const HW_MODES = [
   {
     id: "method", label: "Explain the method", icon: BookOpen,
@@ -5852,15 +5685,6 @@ function SchoolHomework({ ctx }) {
     </div>
   );
 }
-
-/* ============================================================
-   SCHOOL MODULE
-
-   Voice capture uses the browser's own speech engine — no adapter
-   needed, it is genuinely running. In the packaged app the system
-   webview may not expose it, in which case this swaps to a local
-   Whisper model behind the same interface.
-   ============================================================ */
 
 const SPEECH = typeof window !== "undefined"
   ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null;
@@ -6409,15 +6233,6 @@ function SchoolView({ ctx }) {
     </div>
   );
 }
-
-/* ============================================================
-   ENGINEERING MODULE
-
-   The calculators and pin reference are real — no adapter needed,
-   it is arithmetic and lookup tables. Sensor runs are simulated
-   until the serial bridge exists, but the chart draws whatever
-   arrays it is handed, so nothing changes when they become real.
-   ============================================================ */
 
 /* ---------- chart ---------- */
 
@@ -7097,13 +6912,6 @@ function EngineeringView({ ctx }) {
   );
 }
 
-/* ============================================================
-   MODULE ASK
-
-   A small chat scoped to whichever module you are standing in.
-   Lives in the shell, so every module gets one automatically.
-   ============================================================ */
-
 const NO_ASK = new Set(["assistant", "terminal"]);
 
 function ModuleAsk({ mod, ctx }) {
@@ -7234,13 +7042,6 @@ function ModuleAsk({ mod, ctx }) {
     </div>
   );
 }
-
-/* ============================================================
-   ENCYCLOPEDIA
-
-   Real web search through the model, aimed at finding material
-   worth studying rather than answering and moving on.
-   ============================================================ */
 
 const SUBJECTS = [
   { id: "robotics", label: "Robotics", seed: "PID control tuning" },
@@ -7452,14 +7253,6 @@ function EncyclopediaView({ ctx }) {
     </div>
   );
 }
-
-/* ============================================================
-   FITNESS MODULE
-
-   All local, all yours — no adapter, because nothing here comes
-   from the machine. Demo data seeds sample history; with it off
-   you start empty and log your own.
-   ============================================================ */
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const dayLabel = (iso) => {
@@ -7849,16 +7642,6 @@ function FitnessView({ ctx }) {
   );
 }
 
-/* ============================================================
-   AUTOMATION MODULE
-
-   A real rule engine. Threshold rules are evaluated against the
-   live telemetry frame every tick and genuinely fire — edge
-   triggered, so a rule fires once when the condition becomes true,
-   not repeatedly while it stays true. Event and schedule triggers
-   are described but need the OS hooks the backend will provide.
-   ============================================================ */
-
 const TRIGGERS = {
   cpu:   { label: "CPU load", kind: "metric", field: "cpu", unit: "%", live: true },
   mem:   { label: "Memory used", kind: "metric", field: "mem", unit: "%", live: true },
@@ -8150,15 +7933,6 @@ function AutomationView({ ctx }) {
     </div>
   );
 }
-
-/* ============================================================
-   SETTINGS MODULE
-
-   Everything here actually takes effect. The app was built on CSS
-   custom properties from day one, so a theme is just a different
-   set of values for the same variables — swapping them restyles
-   every module at once, with no per-module work.
-   ============================================================ */
 
 const THEMES = {
   midnight: {
@@ -8510,7 +8284,7 @@ function SchoolKeybind({ s, set, ctx }) {
       e.stopPropagation();
       if (e.key === "Escape") { setCapturing(false); return; }
       const combo = comboFromEvent(e);
-      if (!combo) return; // modifier alone — keep waiting
+      if (!combo) return; // modifier alone  -  keep waiting
       // Require at least one modifier so it can't clobber plain typing.
       if (!(e.ctrlKey || e.altKey || e.metaKey)) {
         ctx.toast("Use a modifier — like Alt or Ctrl — with the key.");
@@ -8540,7 +8314,7 @@ function SchoolKeybind({ s, set, ctx }) {
 
 // A guarded factory reset the user can run: first click arms it, second click
 // (within a few seconds) actually wipes. Prevents an accidental data wipe.
-// The About / architecture overview — a full-screen page that explains how
+// The About / architecture overview  -  a full-screen page that explains how
 // Nexus is built, in real technical terms AND plain English, with diagrams.
 // Designed to make sense to a teacher and a non-coder alike.
 function AboutPage({ ctx, onClose }) {
@@ -8555,7 +8329,7 @@ function AboutPage({ ctx, onClose }) {
   const gender = ctx.settings?.voiceGender || "female";
   const name = (ctx.settings?.userName || "").trim();
 
-  // Pre-written narration — reliable, consistent, and it opens by crediting Gio.
+  // Pre-written narration  -  reliable, consistent, and it opens by crediting Gio.
   const SCRIPT = [
     { id: "hero", text: `Welcome to Nexus O S. Nexus was created and founded by Gio Zamudio. Let me walk you through how it all works, from the outside in.` },
     { id: "halves", text: `Everything in Nexus is one of two things. There's the front — the part you see and click. And there's the back — the part that actually reaches into your computer. They talk to each other across a bridge.` },
@@ -8587,7 +8361,7 @@ function AboutPage({ ctx, onClose }) {
     setTouring(true);
     tourAliveRef.current = true;
     // The narration drives itself section by section, so the queue steps aside
-    // for the duration — a port warning must not talk over the tour.
+    // for the duration  -  a port warning must not talk over the tour.
     Speech.hold();
     bedRef.current = makeTourBed();
     bedRef.current.start();
@@ -9175,7 +8949,7 @@ const DEFAULT_SETTINGS = {
   userName: "", greetVoice: true, launchCount: 0, tutorialSeen: false,
 };
 
-// Modules hidden when School mode is on — AI plus the real shell, which is the
+// Modules hidden when School mode is on  -  AI plus the real shell, which is the
 // single most likely thing to alarm a school's security tooling.
 const AI_MODULES = new Set(["assistant", "encyclopedia", "terminal"]);
 
@@ -9216,10 +8990,6 @@ const VIEWS = {
   settings: SettingsView,
 };
 
-/* ============================================================
-   PALETTE
-   ============================================================ */
-
 function Palette({ open, onClose, go, modules = MODULES }) {
   const [q, setQ] = useState("");
   const ref = useRef(null);
@@ -9252,15 +9022,6 @@ function Palette({ open, onClose, go, modules = MODULES }) {
     </div>
   );
 }
-
-/* ============================================================
-   COLD START
-
-   One quote per launch, then it gets out of the way. Sources are
-   all public domain — no attribution roulette, no invented lines.
-   The "don't repeat the last one" rule needs a config file, so it
-   lands when persistence does.
-   ============================================================ */
 
 const QUOTES = [
   { text: "You have power over your mind, not outside events. Realize this, and you will find strength.", who: "Marcus Aurelius", work: "Meditations" },
@@ -9332,19 +9093,6 @@ function Splash({ onDone }) {
   );
 }
 
-/* ============================================================
-   SHELL
-   ============================================================ */
-
-/* ============================================================
-   PERSISTENCE
-
-   usePersistent behaves like useState, but on the desktop it loads
-   its initial value from a JSON file the Rust backend owns, and
-   writes back on every change. In a plain browser it degrades to
-   ordinary in-memory state, so development still works.
-   ============================================================ */
-
 function usePersistent(key, initial) {
   const [val, setVal] = useState(initial);
   const [hydrated, setHydrated] = useState(false);
@@ -9384,16 +9132,6 @@ function usePersistent(key, initial) {
 
   return [val, setVal, hydrated];
 }
-
-/* ============================================================
-   VOICE ASSISTANT ("Jarvis")
-
-   Hold a key (default Space-bar is too noisy, so default is the
-   `\`` backtick key, configurable). While held, the mic listens.
-   On release, the transcript runs through the SAME tool loop the
-   typed assistant uses, so voice can do everything typing can.
-   Optionally speaks the reply back. Hidden in school mode.
-   ============================================================ */
 
 // Voices load asynchronously in Chromium; getVoices() can be empty on first
 // call. Kick a load and cache when they arrive so pickVoice works right away.
@@ -9439,26 +9177,6 @@ const ELEVEN_VOICES = {
 };
 
 let elevenAudio = null; // reuse one Audio element so greetings don't stack
-
-/* ============================================================
-   SPEECH QUEUE
-
-   Several things can decide to talk at once — the launch
-   greeting, a Cyber Twin warning, an answer to something you
-   asked. They used to just cut each other off mid-word, because
-   both backends stop whatever is playing before they start.
-
-   So everything goes through one queue and waits its turn.
-   Two rules on top of plain FIFO:
-
-     · held    — nothing speaks while the startup quote is up.
-                 You read the quote in silence; the queue drains
-                 after you dismiss it.
-     · reply   — an answer to something you actually asked jumps
-                 ahead of queued warnings, and drops them. A port
-                 notice should never make you wait to hear the
-                 thing you just asked for.
-   ============================================================ */
 
 const Speech = (() => {
   let queue = [];
@@ -9515,7 +9233,7 @@ async function utter(text, gender = "female") {
   // Strip anything that shouldn't be read aloud (markdown/LaTeX leftovers),
   // so even if a stray symbol slips through, the voice stays clean.
   const clean = String(text)
-    .replace(/\$\$?([^$]*)\$?\$?/g, "$1")   // $…$ / $$…$$ → contents
+    .replace(/\$\$?([^$]*)\$?\$?/g, "$1")   // $...$ / $$...$$ → contents
     .replace(/\\[a-zA-Z]+/g, " ")            // \int, \frac, \boxed, etc.
     .replace(/[*_#`>~^{}\\]/g, " ")          // markdown/latex punctuation
     .replace(/\s+/g, " ")
@@ -9533,7 +9251,7 @@ async function utter(text, gender = "female") {
       const url = URL.createObjectURL(blob);
       try { elevenAudio?.pause(); } catch { /* no-op */ }
       elevenAudio = new Audio(url);
-      // Resolve when the audio actually ENDS, not when playback starts —
+      // Resolve when the audio actually ENDS, not when playback starts  - 
       // otherwise the queue would fire the next line immediately and we'd be
       // back to everything talking over everything else.
       await new Promise((res) => {
@@ -9546,7 +9264,7 @@ async function utter(text, gender = "female") {
         // Backstop: never let a stuck element wedge the queue shut.
         setTimeout(finish, 30_000);
       });
-      return; // success — natural voice used
+      return; // success  -  natural voice used
     } catch {
       // No key, quota hit, or offline → fall through to system voice.
     }
@@ -9670,7 +9388,9 @@ function VoiceOverlay({ ctx, settings }) {
 
     try {
       let finalText = "";
-      for (let step = 0; step < 5; step++) {
+      // 10 rounds so multi-step voice tasks aren't cut short. Reply cap stays
+      // small on purpose  -  voice answers should be one or two spoken sentences.
+      for (let step = 0; step < 10; step++) {
         if (ac.signal.aborted) { setPhase("idle"); return; }
         const data = await askClaude({
           system: buildSystemPrompt(ctx.t, ctx.online, ctx.launchApps) +
@@ -9698,7 +9418,7 @@ function VoiceOverlay({ ctx, settings }) {
       }
       setReply(finalText || "Done.");
       setPhase("reply");
-      // "reply" — this is the answer to something the user just asked, so it
+      // "reply"  -  this is the answer to something the user just asked, so it
       // jumps any queued background notices rather than waiting behind them.
       speak(finalText || "Done.", speakBack, settings.voiceGender, "reply");
       setTimeout(() => setPhase((p) => (p === "reply" ? "idle" : p)), 5000);
@@ -9721,7 +9441,7 @@ function VoiceOverlay({ ctx, settings }) {
   // Keep the latest process() in a ref so the key listener can be installed
   // ONCE and never rebuilt. (ctx changes every second as telemetry ticks; if
   // the listener depended on it, it would be torn down and recreated
-  // constantly, and a keypress landing in that gap would be missed — which is
+  // constantly, and a keypress landing in that gap would be missed  -  which is
   // exactly the "have to re-set the key before it works" bug.)
   const processRef = useRef(process);
   processRef.current = process;
@@ -9782,7 +9502,7 @@ function VoiceOverlay({ ctx, settings }) {
       heldRef.current = false;
       try { recogRef.current?.stop(); } catch { /* no-op */ }
       // Give the recognizer a moment to flush, then use BOTH the finalized text
-      // and any un-finalized interim tail — otherwise a quick release loses the
+      // and any un-finalized interim tail  -  otherwise a quick release loses the
       // last word or two.
       setTimeout(() => {
         const said = (finalRef.current + " " + (interimRef.current || "")).trim();
@@ -9810,7 +9530,7 @@ function VoiceOverlay({ ctx, settings }) {
       e.stopImmediatePropagation();
       stopListen();
     };
-    // Attached ONCE on mount, in document capture phase — the earliest point in
+    // Attached ONCE on mount, in document capture phase  -  the earliest point in
     // the event path. Reads key/school from refs so it never needs re-attaching.
     document.addEventListener("keydown", down, true);
     document.addEventListener("keyup", up, true);
@@ -9857,21 +9577,6 @@ function VoiceOverlay({ ctx, settings }) {
     </div>
   );
 }
-
-/* ============================================================
-   API KEY SETUP
-
-   Shown on first launch when no key is stored. The key is saved by
-   the Rust backend to the app's private data directory, so it
-   persists for whoever runs the app on this machine — enter once,
-   works until it's cleared or the key runs out of credits.
-   ============================================================ */
-
-/* ============================================================
-   ONBOARDING — welcome + name, shown before the key setup on a
-   brand-new install. Explains what Nexus is and captures the name
-   used in greetings.
-   ============================================================ */
 
 function Welcome({ onNext, name, setName }) {
   const [step, setStep] = useState("intro"); // intro | name
@@ -9924,12 +9629,6 @@ function Welcome({ onNext, name, setName }) {
     </div>
   );
 }
-
-/* ============================================================
-   TUTORIAL — a skippable, replayable highlight tour. Shows an
-   intro with a time estimate, then walks the defining modules
-   with one optional hands-on action each.
-   ============================================================ */
 
 const TUTORIAL_STEPS = [
   {
@@ -9985,10 +9684,10 @@ const TUTORIAL_STEPS = [
   },
 ];
 
-// Tutorial background music — real tracks from /public, fading in at the start
+// Tutorial background music  -  real tracks from /public, fading in at the start
 // and out at the end, crossfading track 1 → track 2 if the tour runs long.
 // Target volume is 50%. Falls silent gracefully if audio can't play.
-// A quieter single-track looping bed for the narrated About tour — track 2 at
+// A quieter single-track looping bed for the narrated About tour  -  track 2 at
 // ~28% so the voice narration sits on top of it cleanly.
 function makeTourBed() {
   let a = null, stopped = false;
@@ -10142,13 +9841,13 @@ function Tutorial({ ctx, onClose }) {
     );
   }
 
-  // step phase — the card is positioned per-step so it moves around the screen
+  // step phase  -  the card is positioned per-step so it moves around the screen
   // and doesn't cover the thing it's describing.
   return (
     <div className={`nx-tut-wrap nx-tut-step nx-tut-pos-${step.pos || "center"}`}
       onKeyDownCapture={(e) => {
         // Never let the push-to-talk key act as button navigation inside the
-        // tour — it belongs to the voice assistant.
+        // tour  -  it belongs to the voice assistant.
         const vk = ctx.settings?.voiceKey || "t";
         if (e.key && e.key.toLowerCase() === vk.toLowerCase()) { e.preventDefault(); e.stopPropagation(); }
       }}>
@@ -10391,7 +10090,7 @@ export default function NexusCore() {
     return () => window.removeEventListener("keydown", onKey);
   }, [splash, settings.schoolKey, setSettings]);
 
-  // Shared reminders/tasks store — the assistant writes to it, the dashboard
+  // Shared reminders/tasks store  -  the assistant writes to it, the dashboard
   // task widget reads from it, and it persists across launches.
   const [reminders, setReminders] = usePersistent("reminders", []);
   const addReminder = useCallback((text, due) => {
@@ -10405,7 +10104,7 @@ export default function NexusCore() {
   const removeReminder = useCallback((id) =>
     setReminders((p) => p.filter((r) => r.id !== id)), [setReminders]);
 
-  // Shared workout store — Fitness reads/writes it, the assistant can log to it.
+  // Shared workout store  -  Fitness reads/writes it, the assistant can log to it.
   const [workouts, setWorkouts] = usePersistent("fit-workouts", []);
   const logWorkout = useCallback(({ kind, note, mins }) => {
     setWorkouts((p) => [{ id: Date.now() + Math.random(),
@@ -10414,10 +10113,10 @@ export default function NexusCore() {
   }, [setWorkouts]);
 
   // Assistant conversation kept at shell level so it survives navigating
-  // away and back. Session-only (not persisted) — resets when the app closes.
+  // away and back. Session-only (not persisted)  -  resets when the app closes.
   const [chat, setChat] = useState([]);
 
-  // Shared quick-launch apps — the widget edits them, the assistant reads
+  // Shared quick-launch apps  -  the widget edits them, the assistant reads
   // them so "launch X" can match a saved app before falling back to a URL.
   const [launchApps, setLaunchApps] = usePersistent("launch-apps", LAUNCH_DEFAULTS);
 
@@ -10587,10 +10286,10 @@ export default function NexusCore() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [booting, splash]);
 
-  // Cyber Twin watcher — while Nexus is open, quietly re-checks the system
+  // Cyber Twin watcher  -  while Nexus is open, quietly re-checks the system
   // against its saved baseline every ~60s and speaks up ONLY when a genuinely
   // new anomaly appears (each specific finding is announced once, not nagged).
-  // Not background OS monitoring — it only runs while the app is open.
+  // Not background OS monitoring  -  it only runs while the app is open.
   const twinSpokenRef = useRef(new Set());
   const cpuHighRef = useRef(0);        // consecutive high-CPU ticks
   const memArmedRef = useRef(true);    // can the memory alert fire? (re-arms on recovery)
@@ -10619,7 +10318,7 @@ export default function NexusCore() {
       toast(worst.text);
     };
 
-    // Overall system pressure — memory and sustained CPU. These don't depend on
+    // Overall system pressure  -  memory and sustained CPU. These don't depend on
     // a baseline; they're about the machine being under strain right now.
     const checkLoad = async () => {
       try {
@@ -10644,7 +10343,7 @@ export default function NexusCore() {
     };
 
     const tick = async () => {
-      await checkLoad(); // overall pressure — always, even without a baseline
+      await checkLoad(); // overall pressure  -  always, even without a baseline
       const base = await readBaseline();
       if (!base || !alive) return;
       try {
@@ -10775,16 +10474,6 @@ export default function NexusCore() {
   );
 }
 
-/* ============================================================
-   AGENT ALERT
-
-   The card that comes and gets you when a run ends or stalls.
-   Mounted at the shell, not inside Agent Mode, because the whole
-   point is that you are somewhere else when it fires. Suppressed
-   while you are actually looking at Agent Mode — you can already
-   see what it is telling you.
-   ============================================================ */
-
 function AgentAlert({ active, go }) {
   const [alert, setAlert] = useState(null);
 
@@ -10822,10 +10511,6 @@ function AgentAlert({ active, go }) {
     </div>
   );
 }
-
-/* ============================================================
-   TOKENS + STYLES — one place, every color
-   ============================================================ */
 
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@200;300;400;600&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -10920,7 +10605,7 @@ body{height:100vh;overflow:hidden;}
 .nx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));
   grid-auto-rows:var(--row);gap:14px;align-content:start;padding-bottom:8px;}
 
-/* centered orbit layout — core dead-center, widgets framing it.
+/* centered orbit layout  -  core dead-center, widgets framing it.
    Every letter must form a solid rectangle or the grid is discarded. */
 .nx-orbit-grid{display:grid;gap:14px;
   grid-template-columns:1fr 1fr 1.2fr 1.2fr 1fr 1fr;
@@ -11221,7 +10906,6 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   margin-top:14px;}
 .nx-orbit-extras>.nx-w{min-height:150px;}
 
-
 .nx-cal{display:flex;flex-direction:column;gap:8px;flex:1;}
 .nx-cal-title{font-size:12px;color:var(--muted);}
 .nx-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;font-family:var(--mono);
@@ -11330,7 +11014,7 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-hex em,.nx-out-head em{color:var(--muted-2);font-style:normal;letter-spacing:0.08em;}
 .nx-out-err{font-size:12px;line-height:1.55;color:var(--ember);}
 
-/* security tools — password / jwt / entropy */
+/* security tools  -  password / jwt / entropy */
 .nx-mono-field{font-family:var(--mono);font-size:12px;}
 .nx-pw-input{display:flex;gap:8px;align-items:center;}
 .nx-pw-input .nx-inline{flex:1;font-family:var(--mono);}
@@ -12118,7 +11802,6 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   text-underline-offset:3px;}
 .nx-setup-skip:hover{color:var(--ice);}
 
-
 /* networking */
 .nx-net-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:12px;}
 .nx-nc{padding:15px 16px;border-radius:14px;border:1px solid var(--edge);
@@ -12655,7 +12338,7 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-agent-status.hold .nx-agent-dot{background:var(--violet);box-shadow:0 0 10px var(--violet);
   animation:nx-pulse 1.6s infinite;}
 
-/* The handoff card. Deliberately the loudest thing on the screen — if the run
+/* The handoff card. Deliberately the loudest thing on the screen  -  if the run
    is parked waiting on a click, that is the only fact that matters. */
 .nx-agent-handoff{padding:16px 18px;border-radius:14px;
   border:1px solid rgba(142,124,255,0.4);background:rgba(142,124,255,0.09);

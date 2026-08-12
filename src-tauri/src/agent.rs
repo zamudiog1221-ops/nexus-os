@@ -1,5 +1,4 @@
-// NEXUS OS — agent execution layer
-// ---------------------------------------------------------------------------
+// NEXUS OS  -  agent execution layer
 // `run_shell` in main.rs is built for a person sitting at a terminal: it blocks
 // until the command finishes and hands back everything at once. That is wrong
 // for an agent working unattended. An installer can run for ten minutes, print
@@ -18,7 +17,6 @@
 //
 // Every command here is namespaced `agent_*` and nothing in main.rs changes
 // behaviour because of it.
-// ---------------------------------------------------------------------------
 
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -29,15 +27,13 @@ use std::time::{Duration, Instant};
 use tauri::{Emitter, Manager};
 
 // How much of a command's output is handed back to the model. Installers are
-// chatty and most of it is progress bars. We keep the head and the tail — the
+// chatty and most of it is progress bars. We keep the head and the tail  -  the
 // head says what it started doing, the tail says how it ended, and the middle
 // is almost never what you need.
 const MAX_CAPTURE: usize = 24_000;
 const HEAD_KEEP: usize = 6_000;
 
-// ---------------------------------------------------------------------------
 // shared state
-// ---------------------------------------------------------------------------
 
 #[derive(Default)]
 pub struct AgentState {
@@ -60,11 +56,9 @@ impl AgentState {
     }
 }
 
-// ---------------------------------------------------------------------------
 // the guard
-// ---------------------------------------------------------------------------
 // This is deliberately short. It is not a sandbox and it is not trying to be
-// clever — a determined model can trivially write around it. What it catches
+// clever  -  a determined model can trivially write around it. What it catches
 // is the realistic failure: a command that got garbled in transcription, or a
 // "cleanup" step the model reasoned its way into, that would take the machine
 // down. None of these patterns appear in a legitimate install.
@@ -109,9 +103,7 @@ fn guard_verdict(cmd: &str) -> Option<String> {
     None
 }
 
-// ---------------------------------------------------------------------------
 // exec
-// ---------------------------------------------------------------------------
 
 #[derive(Serialize, Clone)]
 pub struct ExecResult {
@@ -121,7 +113,7 @@ pub struct ExecResult {
     /// "exited" | "stalled" | "over_time" | "stopped".
     ///
     /// The distinction matters to the model. "stalled" means the process went
-    /// quiet — almost always a prompt waiting on input nobody will type, so
+    /// quiet  -  almost always a prompt waiting on input nobody will type, so
     /// retrying unchanged is pointless. "over_time" means it was working the
     /// whole time and simply ran long, which retrying with a higher ceiling
     /// genuinely does fix.
@@ -161,8 +153,8 @@ fn squeeze(s: String) -> (String, bool) {
         return (s, false);
     }
     // Byte indices, nudged onto char boundaries. Command output is frequently
-    // not clean UTF-8 — progress bars, box-drawing characters, the occasional
-    // stray byte — and slicing mid-character would panic.
+    // not clean UTF-8  -  progress bars, box-drawing characters, the occasional
+    // stray byte  -  and slicing mid-character would panic.
     let head_end = floor_boundary(&s, HEAD_KEEP);
     let tail_start = ceil_boundary(&s, s.len().saturating_sub(MAX_CAPTURE - HEAD_KEEP));
 
@@ -194,7 +186,7 @@ fn ceil_boundary(s: &str, mut i: usize) -> usize {
 }
 
 // `(async)` is load-bearing, not decoration. A plain #[tauri::command] runs on
-// the main thread, and this one blocks for as long as the command takes — up
+// the main thread, and this one blocks for as long as the command takes  -  up
 // to the full timeout. That freezes the webview, and because IPC is also
 // handled on the main thread, it makes agent_stop unreachable: the stop button
 // goes dead exactly when you need it. `(async)` moves the body onto the async
@@ -427,9 +419,7 @@ fn kill_tree(child: &Arc<Mutex<Child>>) {
     let _ = child.lock().unwrap().kill();
 }
 
-// ---------------------------------------------------------------------------
 // the stop button
-// ---------------------------------------------------------------------------
 
 #[tauri::command(async)]
 pub fn agent_stop(app: tauri::AppHandle, run_id: String) -> Result<(), String> {
@@ -459,9 +449,7 @@ pub fn agent_guard_enabled(state: tauri::State<AgentState>) -> bool {
     *state.guard.lock().unwrap()
 }
 
-// ---------------------------------------------------------------------------
 // files
-// ---------------------------------------------------------------------------
 // An agent following a written walkthrough spends half its time writing config
 // files. Doing that through `echo >>` and shell quoting is where these runs
 // usually break, so it gets real file commands instead.
@@ -498,11 +486,9 @@ pub fn agent_read_file(path: String) -> Result<String, String> {
     Ok(text)
 }
 
-// ---------------------------------------------------------------------------
 // the journal
-// ---------------------------------------------------------------------------
-// The whole point is that you walk away. When you come back — possibly after
-// closing the app — the run has to still be there to read.
+// The whole point is that you walk away. When you come back  -  possibly after
+// closing the app  -  the run has to still be there to read.
 
 fn journal_path(app: &tauri::AppHandle, run_id: &str) -> Result<std::path::PathBuf, String> {
     let safe: String = run_id
@@ -563,9 +549,7 @@ pub fn agent_journal_clear(app: tauri::AppHandle, run_id: String) -> Result<(), 
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
 // environment probe
-// ---------------------------------------------------------------------------
 // Cheap orientation so the agent's first move isn't three wasted steps working
 // out what shell it's in and whether git exists.
 

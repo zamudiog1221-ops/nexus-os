@@ -1,10 +1,8 @@
-// NEXUS OS — Tauri backend
-// ---------------------------------------------------------------------------
+// NEXUS OS  -  Tauri backend
 // Every #[command] below is the real counterpart to a mock adapter in the
 // frontend. The frontend calls these with invoke("name", { args }); the
 // return shapes match what the mock versions produced, so the UI does not
-// change — only the source of the data does.
-// ---------------------------------------------------------------------------
+// change  -  only the source of the data does.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -18,8 +16,8 @@ use tauri::{Manager, State};
 // different rules from the interactive commands above: timeouts, kill trees,
 // truncation, and a journal that outlives the window.
 mod agent;
+mod platform;
 
-// ---- shared system handle -------------------------------------------------
 // sysinfo wants to be reused between reads so it can compute deltas (CPU %,
 // network throughput). One instance, guarded by a mutex, refreshed per call.
 
@@ -101,7 +99,6 @@ fn telemetry(state: State<Telemetry>) -> Frame {
     }
 }
 
-// ---- shell execution ------------------------------------------------------
 // Replaces MockShell.run(). Runs a command in the given working directory and
 // returns stdout, stderr and the exit code. The frontend already parses this
 // shape; the difference is these are real processes.
@@ -151,7 +148,6 @@ fn dirs_home() -> String {
         .unwrap_or_else(|_| ".".into())
 }
 
-// ---- DNS lookup -----------------------------------------------------------
 // Replaces MockNet.resolve(). Uses the system resolver.
 
 #[tauri::command]
@@ -169,7 +165,6 @@ fn dns_lookup(host: String) -> Result<Vec<String>, String> {
         })
 }
 
-// ---- ping -----------------------------------------------------------------
 // Replaces MockNet.ping(). Shells out to the system ping once and parses the
 // round-trip time. Cross-platform flag handling.
 
@@ -202,7 +197,6 @@ fn ping_host(host: String) -> Result<f32, String> {
     Err("no reply".into())
 }
 
-// ---- real network info ----------------------------------------------------
 // Reads the machine's actual local IP, gateway, and interface by parsing the
 // platform's own tools. No third-party crates, no raw sockets.
 
@@ -229,7 +223,7 @@ struct Snapshot {
 // A read-only snapshot of the machine's current posture: which TCP ports are
 // listening, how many processes are running, and the heaviest few by memory.
 // The frontend saves one of these as a "baseline" and compares later ones to
-// it — that's the Cyber Twin. All real, all local.
+// it  -  that's the Cyber Twin. All real, all local.
 #[tauri::command]
 fn system_snapshot() -> Result<Snapshot, String> {
     // Listening ports via netstat (Windows). Parse the local address column.
@@ -330,14 +324,14 @@ fn traceroute(host: String) -> Result<Vec<String>, String> {
     Ok(lines)
 }
 
-// Real local devices from the OS ARP table — hosts this machine has recently
+// Real local devices from the OS ARP table  -  hosts this machine has recently
 // communicated with. Reading the table is passive (no active sweep), so it
 // surfaces real neighbours without generating scan traffic.
 #[derive(Serialize)]
 struct Device { ip: String, mac: String, vendor: String, host: String }
 
-// A small built-in OUI table (MAC prefix → vendor). Not exhaustive — the full
-// IEEE registry is huge — but covers the common consumer/network vendors, so
+// A small built-in OUI table (MAC prefix → vendor). Not exhaustive  -  the full
+// IEEE registry is huge  -  but covers the common consumer/network vendors, so
 // most home devices resolve instead of showing blank.
 fn vendor_for(mac: &str) -> String {
     let p = mac.to_lowercase().replace('-', ":");
@@ -394,7 +388,6 @@ fn arp_table() -> Result<Vec<Device>, String> {
     Ok(devices)
 }
 
-// ---- metadata (finder + remover) ------------------------------------------
 // Finder: reads real EXIF from an image (camera, settings, GPS, timestamps).
 // Remover: re-encodes the image so all metadata is dropped, saving a clean
 // copy next to the original. Both operate only on files the user points to.
@@ -464,7 +457,6 @@ fn strip_metadata(path: String) -> Result<String, String> {
     Ok(out_path.to_string_lossy().to_string())
 }
 
-// ---- wifi analyzer --------------------------------------------------------
 // Real wireless info. On Windows, parses `netsh wlan show interfaces` for the
 // current connection and `show networks mode=bssid` for nearby SSIDs. Other
 // platforms return what they can or an honest "not supported".
@@ -537,9 +529,8 @@ fn wifi_info() -> Result<WifiInfo, String> {
     Ok(WifiInfo { connected, networks, supported: true })
 }
 
-// ---- git (read-only) ------------------------------------------------------
 // Reads real data from a local git repository by shelling to `git`. All
-// read-only — status, branch, ahead/behind, recent commits, tracked files.
+// read-only  -  status, branch, ahead/behind, recent commits, tracked files.
 // Never commits, pushes, or changes anything.
 
 #[derive(Serialize)]
@@ -607,10 +598,9 @@ fn git_info(path: String) -> Result<GitInfo, String> {
     Ok(GitInfo { branch, ahead, behind, dirty, commits, files, remote })
 }
 
-// ---- file indexing --------------------------------------------------------
 // Walks a real directory (one level deep by default, or recursive) and returns
 // real file metadata. Text file bodies are read only for small files so search
-// can look inside them. No writes, ever — this is read-only.
+// can look inside them. No writes, ever  -  this is read-only.
 
 #[derive(Serialize)]
 struct IndexedFile {
@@ -694,7 +684,7 @@ fn index_folder(path: String, recursive: bool) -> Result<Vec<IndexedFile>, Strin
 
 // Best-effort hostname for one IP. On Windows, nbtstat -A returns the NetBIOS
 // name table for a host; the "<00>  UNIQUE" entry is usually the machine name.
-// Many home devices (phones, IoT) don't answer — returns blank when unknown.
+// Many home devices (phones, IoT) don't answer  -  returns blank when unknown.
 #[tauri::command]
 fn resolve_hostname(ip: String) -> Result<String, String> {
     let ip = ip.trim().to_string();
@@ -726,7 +716,6 @@ fn resolve_hostname(ip: String) -> Result<String, String> {
     }
 }
 
-// ---- ElevenLabs voice (optional) ------------------------------------------
 // A separate key from the Anthropic one, stored the same way. If present, TTS
 // requests go to ElevenLabs for a natural voice; if absent, the frontend falls
 // back to the system (Windows) voice. Read-only network calls to ElevenLabs.
@@ -795,7 +784,6 @@ async fn eleven_tts(app: tauri::AppHandle, text: String, voice_id: String) -> Re
     Ok(bytes.to_vec())
 }
 
-// ---- weather --------------------------------------------------------------
 // Real current conditions from Open-Meteo (free, no key). The frontend passes
 // coordinates; we return temp (F), a condition label, and the day's hi/lo.
 
@@ -850,9 +838,8 @@ async fn get_weather(lat: f64, lon: f64) -> Result<Weather, String> {
     })
 }
 
-// ---- config persistence ---------------------------------------------------
 // Replaces the "reset on reload" gap. Settings, dashboard layout, projects,
-// files metadata, rules — anything the frontend wants to keep — is a JSON blob
+// files metadata, rules  -  anything the frontend wants to keep  -  is a JSON blob
 // written next to the app's data directory.
 
 #[tauri::command]
@@ -882,13 +869,11 @@ fn state_path(app: &tauri::AppHandle, key: &str) -> Result<std::path::PathBuf, S
     Ok(dir.join("state").join(format!("{safe}.json")))
 }
 
-// ---- API key --------------------------------------------------------------
 // The key lives in an environment variable read by the Rust process, never in
 // the frontend bundle. The frontend asks whether a key is present; it never
 // receives the value. Real model calls are proxied through call_model so the
 // key never crosses into JavaScript.
 
-// ---- launch apps / urls ---------------------------------------------------
 // Opens an application, file, or URL using the OS's native "open" mechanism.
 // On Windows that's `cmd /C start`, macOS `open`, Linux `xdg-open`. A target
 // can be an app name on PATH, a full path, or a URL.
@@ -901,7 +886,7 @@ fn launch_app(target: String) -> Result<(), String> {
     }
 
     // Store/UWP apps live in the protected WindowsApps folder and can't be run
-    // by their .exe path — Windows blocks it. Point the user at the real way.
+    // by their .exe path  -  Windows blocks it. Point the user at the real way.
     if t.to_lowercase().contains("windowsapps") {
         let hint = if t.to_lowercase().contains("spotify") {
             "  Try  spotify:  instead."
@@ -927,7 +912,6 @@ fn launch_app(target: String) -> Result<(), String> {
     result.map(|_| ()).map_err(|e| format!("Could not launch '{t}': {e}"))
 }
 
-// ---- API key management ---------------------------------------------------
 // The key is stored in the app's private data directory so each person who
 // runs the app enters their own key once and it persists on their machine.
 // An ANTHROPIC_API_KEY env var still works as an override for development.
@@ -972,7 +956,7 @@ fn clear_api_key(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// DEV ONLY — wipes the entire app data directory (keys + all state) so the next
+// DEV ONLY  -  wipes the entire app data directory (keys + all state) so the next
 // launch behaves like a brand-new install. Remove this command and its button
 // before shipping the final build.
 #[tauri::command]
@@ -995,7 +979,7 @@ fn has_api_key(app: tauri::AppHandle) -> bool {
     read_saved_key(&app).is_some()
 }
 
-// Masked preview like "sk-ant-…a1b2" so the UI can show a key is set without
+// Masked preview like "sk-ant-...a1b2" so the UI can show a key is set without
 // ever exposing the whole value.
 #[tauri::command]
 fn api_key_hint(app: tauri::AppHandle) -> Option<String> {
@@ -1014,7 +998,7 @@ struct ModelCall {
 /// `Client::new()` per call throws away the connection pool, so every turn of an
 /// agent run paid for a fresh DNS lookup and TLS handshake before it could send
 /// a byte. Reusing the client keeps the connection to api.anthropic.com warm
-/// between turns. reqwest::Client is already an Arc internally — cloning is
+/// between turns. reqwest::Client is already an Arc internally  -  cloning is
 /// cheap and sharing it across tasks is the intended use.
 static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 
@@ -1093,7 +1077,6 @@ fn main() {
             factory_reset,
             call_model,
             launch_app,
-            // ---- agent mode ----
             agent::agent_exec,
             agent::agent_stop,
             agent::agent_reset,
