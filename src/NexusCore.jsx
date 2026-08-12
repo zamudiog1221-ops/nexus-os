@@ -5835,7 +5835,23 @@ function SchoolNotes({ ctx }) {
           mr.ondataavailable = (ev) => { if (ev.data.size) chunksRef.current.push(ev.data); };
           mr.onstop = () => {
             const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
-            setAudio({ url: URL.createObjectURL(blob), segments: segRef.current.slice() });
+            const segments = segRef.current.slice();
+            const url = URL.createObjectURL(blob);
+            // Persist the recording inline as a data URL so it survives a restart.
+            // Above ~20MB (a long class) keep it session-only, so the notes store
+            // doesn't balloon; disk-file storage is the fix for long recordings.
+            const CAP = 20 * 1024 * 1024;
+            if (blob.size > CAP) {
+              setAudio({ url, dataUrl: null, segments });
+              ctx.toast("Recording kept for this session (too large to save)");
+              streamRef.current?.getTracks().forEach((tr) => tr.stop());
+              streamRef.current = null;
+              return;
+            }
+            const fr = new FileReader();
+            fr.onload = () => setAudio({ url, dataUrl: fr.result, segments });
+            fr.onerror = () => setAudio({ url, dataUrl: null, segments });
+            fr.readAsDataURL(blob);
             streamRef.current?.getTracks().forEach((tr) => tr.stop());
             streamRef.current = null;
           };
@@ -5878,8 +5894,9 @@ function SchoolNotes({ ctx }) {
       day: now.toISOString().slice(0, 10),   // YYYY-MM-DD, the folder key
       at: now.getTime(),
       topic: null, summary: null, reminders: null,
-      // The note takes ownership of the audio URL + segment timestamps.
-      audioUrl: audio?.url || null,
+      // Persist the recording as a data URL so it replays after a restart;
+      // fall back to the session blob URL if the data URL isn't ready.
+      audioUrl: audio?.dataUrl || audio?.url || null,
       segments: audio?.segments || [],
       stripped: wordCount(raw) - wordCount(clean),
     };
