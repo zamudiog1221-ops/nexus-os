@@ -116,6 +116,27 @@ All JS verified via esbuild transform each step. Committed in two checkpoints (b
 
 Next: Stage 3 - audio recording + persistence + per-reminder replay. Needs MediaRecorder + timestamps + a Rust command to save/serve audio files, so it's the compile-heavy piece.
 
+2026-08-12 (cont.) — Audio replay: record, persist, replay-per-reminder (feature session)
+
+Did:
+
+First real compile happened this session (npm run tauri dev on PC 1) - everything built and ran, all previously-unrun features confirmed working (notifications, run history, cost, agent handoff, model-picker persistence). Committed + pushed to GitHub (private, zamudiog1221-ops/nexus-os).
+Machine plan settled: PC 1 (personal, admin, build tools already installed) = dev + compile; PC 2 (school, 16GB, VirtualBox) = Linux VM host later; GitHub = sync pipe.
+Voice Notes audio, built in three sub-stages:
+  3a - MediaRecorder captures the class audio alongside the speech engine; each final transcript chunk is timestamped against audio t=0. Reminder extraction now also returns a verbatim "quote", matched back to a segment so each reminder gets an audio timestamp. Per-reminder Replay button + an audio player in the note. Session-only at this point.
+  3b - persist the recording as a base64 data URL on the note so replay survives restart (with a size guard).
+  3c - moved the recording OUT of the notes store into its own per-recording file on disk, using the app's existing save_state/load_state (key = "rec-<noteId>"). Note keeps only audioId; audio lazy-loads from disk when the note is opened. No new Rust, no compile risk. Raised cap to 250MB.
+
+Learned / noted:
+
+save_state sanitizes its key and writes each to its own state/<key>.json file - so giving each recording its own key was a zero-Rust way to get per-file audio storage. Reused tested code instead of writing a new command + asset-protocol config.
+WebView2 mic (getUserMedia) is the one unknown - if the app window blocks it, audio capture won't work and recording moves to Rust/cpal. Transcript still works regardless (separate API). Gio to confirm on test.
+All JS verified with esbuild transform at each step. Five commits this session (a12af03 docs/fixes, bcda575 voice-notes overhaul, b9ce4ce calendar, cd0d0ad/d0c98b8/b4deea4 audio 3a/3b/3c).
+
+Known small gaps (not urgent): deleting a note leaves an orphan recording file; very long recordings above 250MB stay session-only; drop-notes-into-Files not done yet.
+
+Next: pick one - the "resume every tab where I left off" idea, drop notes into Files, or back to the Linux port on PC 2.
+
 Template
 ## YYYY-MM-DD — Short title (~Nh)
 
