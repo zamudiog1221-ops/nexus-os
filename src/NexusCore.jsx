@@ -1274,100 +1274,87 @@ const ORBIT = [
   { id: "calendar",     area: "l" },
 ];
 
-function OrbitDashboard({ ctx, layout }) {
-  // The orbit has fixed frame positions (a-l + core). Any widget present in
-  // the saved layout AND assigned a slot renders in the frame. Widgets the
-  // user added that don't have a slot flow into a row beneath the orbit, so
-  // adding a widget in Rearrange actually shows up here.
+function OrbitDashboard({ ctx, layout, setLayout, edit }) {
+  // Each widget's orbit slot (a-l or core) is stored on its layout item as
+  // `area`; if it was never set, we fall back to the original ORBIT position.
+  // `area: null` means "no orbit slot" - it flows into the extras row below.
+  // Rearrange edits these areas in place, so what you see is what saves.
   const slotOf = new Map(ORBIT.map((o) => [o.id, o.area]));
-  const inLayout = new Set(layout.map((l) => l.id));
+  const areaOf = (item) => (item.area === undefined ? (slotOf.get(item.id) ?? null) : item.area);
+  const areaSet = new Set(ORBIT.map((o) => o.area));
   const schoolMode = ctx.settings?.schoolMode;
-  const aiWidget = (id) => id === "quickchat"; // the Ask Nexus widget
+  const aiWidget = (id) => id === "quickchat";
 
-  const framed = ORBIT.filter((o) =>
-    (inLayout.has(o.id) || o.id === "coremap") && !(schoolMode && aiWidget(o.id)));
-  const extras = layout.filter((l) => !slotOf.has(l.id) && !(schoolMode && aiWidget(l.id)));
+  const [drag, setDrag] = useState(null); // id being dragged
+
+  const visible = layout.filter((it) => WIDGET_MAP.get(it.id) && !(schoolMode && aiWidget(it.id)));
+  const framed = visible.filter((it) => areaSet.has(areaOf(it)));
+  const extras = visible.filter((it) => !areaSet.has(areaOf(it)));
+
+  // Swap two widgets' slots. Handles orbit<->orbit, orbit<->extras, and the core.
+  const swap = (aId, bId) => {
+    if (!aId || !bId || aId === bId) return;
+    setLayout((p) => {
+      const a = p.find((x) => x.id === aId), b = p.find((x) => x.id === bId);
+      if (!a || !b) return p;
+      const aArea = a.area === undefined ? (slotOf.get(a.id) ?? null) : a.area;
+      const bArea = b.area === undefined ? (slotOf.get(b.id) ?? null) : b.area;
+      return p.map((x) =>
+        x.id === aId ? { ...x, area: bArea } : x.id === bId ? { ...x, area: aArea } : x);
+    });
+  };
+  const removeWidget = (id) => setLayout((p) => p.filter((x) => x.id !== id));
+
+  const cell = (item, framedCell) => {
+    const w = WIDGET_MAP.get(item.id);
+    const area = areaOf(item);
+    const isCore = area === "core";
+    return (
+      <div key={item.id}
+        className={`nx-orbit-cell${framedCell ? "" : " nx-orbit-cell-extra"}${drag === item.id ? " nx-cell-drag" : ""}`}
+        style={framedCell ? { gridArea: area } : undefined}
+        draggable={edit}
+        onDragStart={edit ? () => setDrag(item.id) : undefined}
+        onDragEnd={edit ? () => setDrag(null) : undefined}
+        onDragOver={edit ? (e) => e.preventDefault() : undefined}
+        onDrop={edit ? (e) => { e.preventDefault(); swap(drag, item.id); setDrag(null); } : undefined}>
+        <article className={`nx-w${isCore ? " nx-w-core" : ""}${edit ? " nx-w-editing" : ""}`}>
+          {edit && (
+            <div className="nx-w-edit-bar">
+              <span className="nx-w-grip"><GripVertical size={12} /> drag to swap</span>
+              <button className="nx-w-x" title="Remove widget" onClick={() => removeWidget(item.id)}><X size={12} /></button>
+            </div>
+          )}
+          <header className="nx-w-head"><w.icon size={13} /><h3>{w.title}</h3></header>
+          <div className="nx-w-body">
+            <WidgetBoundary title={w.title}>{w.render(ctx)}</WidgetBoundary>
+          </div>
+        </article>
+      </div>
+    );
+  };
 
   return (
     <>
-      <div className="nx-orbit-grid">
-        {framed.map(({ id, area }) => {
-          const w = WIDGET_MAP.get(id);
-          if (!w) return null;
-          return (
-            <div key={id} className="nx-orbit-cell" style={{ gridArea: area }}>
-              <article className={`nx-w${area === "core" ? " nx-w-core" : ""}`}>
-                <header className="nx-w-head"><w.icon size={13} /><h3>{w.title}</h3></header>
-                <div className="nx-w-body">
-                  <WidgetBoundary title={w.title}>{w.render(ctx)}</WidgetBoundary>
-                </div>
-              </article>
-            </div>
-          );
-        })}
+      <div className={`nx-orbit-grid${edit ? " nx-orbit-edit" : ""}`}>
+        {framed.map((it) => cell(it, true))}
       </div>
-      {extras.length > 0 && (
+      {(extras.length > 0 || edit) && (
         <div className="nx-orbit-extras">
-          {extras.map((item) => {
-            const w = WIDGET_MAP.get(item.id);
-            if (!w) return null;
-            return (
-              <article key={item.id} className="nx-w">
-                <header className="nx-w-head"><w.icon size={13} /><h3>{w.title}</h3></header>
-                <div className="nx-w-body">
-                  <WidgetBoundary title={w.title}>{w.render(ctx)}</WidgetBoundary>
-                </div>
-              </article>
-            );
-          })}
+          {extras.map((it) => cell(it, false))}
+          {edit && extras.length === 0 && <p className="nx-tool-note nx-tool-note-flush">Widgets you add or drag out land here.</p>}
         </div>
       )}
+      {edit && <AddTray layout={layout} setLayout={setLayout} />}
     </>
   );
 }
 
+// The orbit is both the view and the editor now: Rearrange keeps the same look
+// and lets you drag widgets to swap slots (including the core), remove them, and
+// add more - all in place, all saved. No separate grid mode.
 function Dashboard({ layout, setLayout, edit, ctx }) {
-  const [drag, setDrag] = useState(null);
-  const [over, setOver] = useState(null);
-  const dragRef = useRef(null);
-
-  const move = useCallback((from, to) => {
-    if (from == null || to == null || from === to) return;
-    setLayout((p) => {
-      if (to < 0 || to >= p.length) return p;
-      const next = [...p];
-      next.splice(to, 0, next.splice(from, 1)[0]);
-      return next;
-    });
-  }, [setLayout]);
-
-  const on = useMemo(() => ({
-    start: (i) => { dragRef.current = i; setDrag(i); },
-    end: () => { dragRef.current = null; setDrag(null); setOver(null); },
-    over: (i) => setOver(i),
-    drop: (i) => { move(dragRef.current, i); dragRef.current = null; setDrag(null); setOver(null); },
-    nudge: (i, d) => move(i, i + d),
-    resize: (i) => setLayout((p) => p.map((w, j) =>
-      j === i ? { ...w, size: SIZE_ORDER[(SIZE_ORDER.indexOf(w.size) + 1) % SIZE_ORDER.length] } : w)),
-    remove: (i) => setLayout((p) => p.filter((_, j) => j !== i)),
-  }), [move, setLayout]);
-
-  // Default view: fixed centered orbit. Rearrange: free drag grid.
-  if (!edit) return <OrbitDashboard ctx={ctx} layout={layout} />;
-
-  return (
-    <div className={`nx-grid${edit ? " nx-grid-edit" : ""}`}>
-      {layout.map((item, i) => {
-        const w = WIDGET_MAP.get(item.id);
-        if (!w) return null;
-        return (
-          <WidgetCell key={item.id} w={w} item={item} index={i} edit={edit} ctx={ctx}
-            dragging={drag === i} over={over === i} on={on} />
-        );
-      })}
-      {edit && <AddTray layout={layout} setLayout={setLayout} />}
-    </div>
-  );
+  return <OrbitDashboard ctx={ctx} layout={layout} setLayout={setLayout} edit={edit} />;
 }
 
 function AddTray({ layout, setLayout }) {
@@ -1381,7 +1368,7 @@ function AddTray({ layout, setLayout }) {
           : (
             <div className="nx-tray-list">
               {missing.map((w) => (
-                <button key={w.id} onClick={() => setLayout((p) => [...p, { id: w.id, size: w.size }])}>
+                <button key={w.id} onClick={() => setLayout((p) => [...p, { id: w.id, size: w.size, area: null }])}>
                   <w.icon size={12} />{w.title}
                 </button>
               ))}
@@ -10932,7 +10919,7 @@ export default function NexusCore() {
 
         {edit && active === "dashboard" && (
           <p className="nx-hint">
-            Drag a card to reorder, or focus a grip and press ← →. Click the size chip to resize.
+            Drag a widget onto another to swap their spots — the core orb too. Use × to remove, or add more below.
           </p>
         )}
 
@@ -11138,6 +11125,17 @@ body{height:100vh;overflow:hidden;}
   display:flex;flex-direction:column;transition:border-color .22s,box-shadow .22s;}
 .nx-w:hover{border-color:rgba(159,190,255,0.19);}
 .nx-grid-edit .nx-w{cursor:grab;border-style:dashed;border-color:rgba(159,190,255,0.2);}
+/* In-place orbit editing: dashed cells, a small edit bar, drag-to-swap. */
+.nx-orbit-edit .nx-orbit-cell,.nx-orbit-extras .nx-orbit-cell-extra{cursor:grab;}
+.nx-w-editing{border-style:dashed;border-color:rgba(159,190,255,0.28);}
+.nx-cell-drag{opacity:0.45;}
+.nx-w-edit-bar{display:flex;align-items:center;justify-content:space-between;
+  margin:-4px -4px 8px;padding:2px 4px;}
+.nx-w-grip{display:flex;align-items:center;gap:5px;font-size:10px;letter-spacing:0.04em;
+  text-transform:uppercase;color:var(--muted-2);}
+.nx-w-x{display:flex;align-items:center;justify-content:center;width:22px;height:22px;
+  border-radius:7px;border:1px solid var(--edge);background:transparent;color:var(--muted-2);cursor:pointer;}
+.nx-w-x:hover{color:var(--ember);border-color:var(--ember);}
 .nx-w-drag{opacity:0.35;}
 .nx-w-over{border-color:var(--signal)!important;box-shadow:0 0 0 1px var(--signal),0 0 26px var(--glow-soft);}
 .nx-w-head{display:flex;align-items:center;gap:8px;margin-bottom:8px;color:var(--muted-2);flex-shrink:0;}
