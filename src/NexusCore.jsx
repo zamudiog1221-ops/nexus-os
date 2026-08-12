@@ -261,6 +261,17 @@ function NetBody({ t }) {
   );
 }
 
+// Dashboard only surfaces reminders that are imminent - overdue, due today, or
+// due tomorrow - so it doesn't fill up with things weeks away. resolveDue turns
+// the free-text due into a real date; undated reminders are treated as not near.
+function dueNear(r) {
+  const d = resolveDue(r.due, r.at);
+  if (!d) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  return d <= tomorrow;
+}
+
 /* Notifications built entirely from real app state  -  no canned messages.
    Sources: reminders you've added, live system load, and connectivity. */
 function NotifBody({ ctx }) {
@@ -276,7 +287,7 @@ function NotifBody({ ctx }) {
     if (t.disk > 92) items.push({ id: "disk", tone: "ember", text: `Disk ${Math.round(t.disk)}% full`, when: "now" });
     if (t.temp > 88) items.push({ id: "temp", tone: "ember", text: `Running hot at ${Math.round(t.temp)}°C`, when: "now" });
   }
-  const openReminders = reminders.filter((r) => !r.done);
+  const openReminders = reminders.filter((r) => !r.done && dueNear(r));
   openReminders.slice(0, 4).forEach((r) =>
     items.push({ id: "rem-" + r.id, tone: "signal", text: r.text + (r.due ? ` · ${r.due}` : ""), when: "reminder" }));
 
@@ -297,12 +308,22 @@ function NotifBody({ ctx }) {
 
 function TaskBody({ ctx }) {
   const reminders = ctx?.reminders || [];
-  if (!reminders.length) {
-    return <p className="nx-blank">No reminders yet. Ask the assistant to add one.</p>;
+  // Only show what's imminent so the dashboard stays clean. Everything else
+  // lives in the Calendar module.
+  const near = reminders.filter((r) => !r.done && dueNear(r));
+  const laterCount = reminders.filter((r) => !r.done && !dueNear(r)).length;
+  if (!near.length) {
+    return (
+      <p className="nx-blank">
+        {reminders.length
+          ? `Nothing due today or tomorrow.${laterCount ? ` ${laterCount} later in Calendar.` : ""}`
+          : "No reminders yet. Ask the assistant to add one."}
+      </p>
+    );
   }
   return (
     <ul className="nx-tasks">
-      {reminders.slice(0, 6).map((k) => (
+      {near.slice(0, 6).map((k) => (
         <li key={k.id}>
           <button className={k.done ? "nx-task-on" : ""} aria-pressed={k.done}
             onClick={() => ctx.toggleReminder(k.id)}>
@@ -310,6 +331,7 @@ function TaskBody({ ctx }) {
           </button>
         </li>
       ))}
+      {laterCount > 0 && <li className="nx-task-more">+{laterCount} more in Calendar</li>}
     </ul>
   );
 }
@@ -11930,6 +11952,7 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   border-radius:10px;background:rgba(2,4,9,0.4);}
 .nx-rem-done{text-decoration:line-through;opacity:0.55;}
 .nx-note-audio{width:100%;height:34px;margin-top:6px;border-radius:8px;}
+.nx-task-more{list-style:none;font-size:11px;color:var(--muted-2);padding:4px 0 0 2px;opacity:0.8;}
 
 .nx-drop-zone{position:relative;border-radius:16px;transition:all .2s;}
 .nx-drop-field{border-style:dashed;}
