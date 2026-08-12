@@ -10606,6 +10606,17 @@ export default function NexusCore() {
       reminders, addReminder, toggleReminder, removeReminder, updateReminder, workouts, setWorkouts, logWorkout,
       launchApps, setLaunchApps, projects, filesFolder, chat, setChat]);
 
+  // Keep-alive: every module you open stays mounted (just hidden) so its state
+  // - sub-tabs, half-typed drafts, scroll, searches - is exactly where you left
+  // it when you switch back. Only the active one is visible; everything remounts
+  // fresh on a restart. Inactive modules reuse their last-rendered element so
+  // they don't re-render on telemetry ticks (keeps switching cheap).
+  const [visited, setVisited] = useState(() => new Set([active]));
+  useEffect(() => {
+    setVisited((s) => (s.has(active) ? s : new Set(s).add(active)));
+  }, [active]);
+  const viewCache = useRef({});
+
   // Sound: keep the engine in sync with settings, then let it listen
   // globally. One delegated listener beats wiring every button.
   useEffect(() => {
@@ -10925,11 +10936,25 @@ export default function NexusCore() {
           </p>
         )}
 
-        {active === "dashboard"
-          ? <Dashboard layout={layout} setLayout={setLayout} edit={edit} ctx={ctx} />
-          : VIEWS[active]
-            ? React.createElement(VIEWS[active], { ctx })
-            : <ModuleView mod={mod} />}
+        {(() => {
+          const renderModule = (id) => {
+            if (id === "dashboard") return <Dashboard layout={layout} setLayout={setLayout} edit={edit} ctx={ctx} />;
+            if (VIEWS[id]) return React.createElement(VIEWS[id], { ctx });
+            return <ModuleView mod={MODULES.find((m) => m.id === id) || MODULES[0]} />;
+          };
+          const ids = new Set(visited); ids.add(active);
+          // Recompute only the active module (fresh ctx); reuse cached elements
+          // for the hidden ones so React bails out of re-rendering them.
+          for (const id of ids) {
+            if (id === active || !viewCache.current[id]) viewCache.current[id] = renderModule(id);
+          }
+          return [...ids].map((id) => (
+            <div key={id} className="nx-view-slot"
+              style={{ display: id === active ? "contents" : "none" }}>
+              {viewCache.current[id]}
+            </div>
+          ));
+        })()}
       </main>
 
       {!splash && settings.ask && !settings.schoolMode && !NO_ASK.has(active) && <ModuleAsk mod={mod} ctx={ctx} />}
@@ -11052,6 +11077,10 @@ body{height:100vh;overflow:hidden;}
 .nx-main{flex:1;min-width:0;overflow-y:auto;padding:30px 44px 28px;display:flex;flex-direction:column;align-items:stretch;}
 .nx-main>*{width:100%;max-width:none;}
 .nx-main>.nx-grid,.nx-main>.nx-mod,.nx-main>.nx-module{flex-shrink:0;}
+/* Keep-alive slots are display:contents when active, so module roots still act
+   as direct flex children of nx-main - mirror the width/shrink rules onto them. */
+.nx-view-slot>*{width:100%;max-width:none;}
+.nx-view-slot>.nx-grid,.nx-view-slot>.nx-mod,.nx-view-slot>.nx-module{flex-shrink:0;}
 .nx-topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;
   padding-bottom:20px;margin-bottom:22px;border-bottom:1px solid var(--edge);}
 .nx-topbar h2{font-size:26px;font-weight:200;letter-spacing:-0.01em;}
