@@ -12,7 +12,7 @@ import {
   Mic, Filter, BookOpen, ListOrdered, Repeat, Upload,
   Calculator, CircuitBoard, Zap,
   Library, Bookmark, ExternalLink,
-  Minus, Unlock, Info, Server, Code2, Boxes, Bot, Hand
+  Minus, Unlock, Info, Server, Code2, Boxes, Bot, Hand, Play
 } from "lucide-react";
 import AgentMode from "./AgentMode.jsx";
 // Watching the agent for "finished" / "needs you" starts on import  -  the
@@ -5708,6 +5708,24 @@ const wordCount = (t) => (t.trim() ? t.trim().split(/\s+/).length : 0);
 
 /* ---------- voice notes ---------- */
 
+// Find which recorded segment a reminder came from, by matching the model's
+// verbatim quote against the timestamped transcript chunks. Returns the segment
+// start time in seconds, or null if nothing lines up (no replay button then).
+function matchSegment(quote, segments) {
+  if (!quote || !segments?.length) return null;
+  const words = String(quote).toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+  if (!words.length) return null;
+  let best = null, bestScore = 0;
+  for (const s of segments) {
+    const st = s.text.toLowerCase();
+    let score = 0;
+    for (const w of words) if (st.includes(w)) score++;
+    if (score > bestScore) { bestScore = score; best = s; }
+  }
+  // Require at least two shared words (or one when the quote is very short).
+  return bestScore >= Math.min(2, words.length) ? best.t : null;
+}
+
 function SchoolNotes({ ctx }) {
   const { demo } = ctx;
   // Persisted to disk so notes, summaries and extracted reminders survive a
@@ -5733,6 +5751,16 @@ function SchoolNotes({ ctx }) {
   const tickRef = useRef(null);
   const abortRef = useRef(null);
   const remAbortRef = useRef(null);
+  // Audio capture runs alongside the speech engine: MediaRecorder saves the
+  // sound, segRef timestamps each final transcript chunk against recStartRef,
+  // so a reminder can later jump to the exact moment it was said.
+  const mediaRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const segRef = useRef([]);
+  const recStartRef = useRef(0);
+  const noteAudioRef = useRef(null);
+  const [audio, setAudio] = useState(null); // pending draft's { url, segments } until saved
 
   const filterWords = useMemo(() => {
     const custom = extra.split(",").map((w) => w.trim().toLowerCase()).filter(Boolean);
@@ -5742,6 +5770,8 @@ function SchoolNotes({ ctx }) {
   useEffect(() => () => {
     wantRef.current = false;
     try { recRef.current?.stop(); } catch { /* already stopped */ }
+    try { if (mediaRef.current?.state !== "inactive") mediaRef.current?.stop(); } catch { /* fine */ }
+    streamRef.current?.getTracks().forEach((tr) => tr.stop());
     clearInterval(tickRef.current);
     abortRef.current?.abort();
     remAbortRef.current?.abort();
@@ -5759,8 +5789,14 @@ function SchoolNotes({ ctx }) {
       let inter = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const r = e.results[i];
-        if (r.isFinal) bufRef.current += r[0].transcript.trim() + " ";
-        else inter += r[0].transcript;
+        if (r.isFinal) {
+          const seg = r[0].transcript.trim();
+          bufRef.current += seg + " ";
+          // Stamp this chunk against audio t=0 so we can jump back to it later.
+          if (recStartRef.current) {
+            segRef.current.push({ t: Math.max(0, (Date.now() - recStartRef.current) / 1000), text: seg });
+          }
+        } else inter += r[0].transcript;
       }
       setFinalText(bufRef.current);
       setInterim(inter);
@@ -5786,11 +5822,36 @@ function SchoolNotes({ ctx }) {
     setLive(true);
     clearInterval(tickRef.current);
     tickRef.current = setInterval(() => setSecs((s) => s + 1), 1000);
+
+    // Fresh audio capture for this session. If the mic can't be opened, the
+    // transcript still works  -  we just won't have a clip to replay.
+    if (!audio) {
+      segRef.current = [];
+      chunksRef.current = [];
+      if (navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
+        navigator.mediaDevices.getUserMedia({ audio: true }).then((stream) => {
+          streamRef.current = stream;
+          const mr = new MediaRecorder(stream);
+          mr.ondataavailable = (ev) => { if (ev.data.size) chunksRef.current.push(ev.data); };
+          mr.onstop = () => {
+            const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
+            setAudio({ url: URL.createObjectURL(blob), segments: segRef.current.slice() });
+            streamRef.current?.getTracks().forEach((tr) => tr.stop());
+            streamRef.current = null;
+          };
+          mediaRef.current = mr;
+          recStartRef.current = Date.now();
+          mr.start();
+        }).catch(() => { /* no mic / denied  -  transcript-only */ });
+      }
+    }
   };
 
   const stop = () => {
     wantRef.current = false;
     try { recRef.current?.stop(); } catch { /* fine */ }
+    // Stopping the recorder fires onstop, which builds the audio blob.
+    try { if (mediaRef.current?.state !== "inactive") mediaRef.current?.stop(); } catch { /* fine */ }
     setLive(false);
     setInterim("");
     clearInterval(tickRef.current);
@@ -5798,6 +5859,9 @@ function SchoolNotes({ ctx }) {
 
   const reset = () => {
     bufRef.current = "";
+    segRef.current = [];
+    try { if (audio?.url) URL.revokeObjectURL(audio.url); } catch { /* fine */ }
+    setAudio(null);
     setFinalText(""); setInterim(""); setSecs(0); setTitle("");
   };
 
@@ -5814,10 +5878,17 @@ function SchoolNotes({ ctx }) {
       day: now.toISOString().slice(0, 10),   // YYYY-MM-DD, the folder key
       at: now.getTime(),
       topic: null, summary: null, reminders: null,
+      // The note takes ownership of the audio URL + segment timestamps.
+      audioUrl: audio?.url || null,
+      segments: audio?.segments || [],
       stripped: wordCount(raw) - wordCount(clean),
     };
     setNotes((p) => [note, ...p]);
-    stop(); reset();
+    stop();
+    // Clear the draft WITHOUT revoking the audio URL  -  the note owns it now.
+    bufRef.current = ""; segRef.current = [];
+    setAudio(null);
+    setFinalText(""); setInterim(""); setSecs(0); setTitle("");
     ctx.toast("Note saved");
     // Automatically detect the topic, pull tests/deadlines, and add them
     // straight to the reminder list. No button, no confirm.
@@ -5853,7 +5924,7 @@ function SchoolNotes({ ctx }) {
     remAbortRef.current = ac;
     try {
       const raw = await askClaude({
-        system: 'You are given a rough class transcript. Return ONLY a JSON object, no prose and no code fences, shaped {"topic":"Subject - specific topic","reminders":[{"text":"short reminder","due":"day or date, or empty string"}]}. "topic" is a short label like "Physics - Thermodynamics" or "US History - Civil War"; if unclear, use a best guess from the content. "reminders" holds only concrete things the student must remember or do: tests, quizzes, homework, projects, deadlines, or anything explicitly said to be due or on a test. Copy the day or date exactly as spoken (e.g. "Friday", "next Tuesday", "Oct 3"). If nothing qualifies, use an empty array. Never invent anything not in the transcript.',
+        system: 'You are given a rough class transcript. Return ONLY a JSON object, no prose and no code fences, shaped {"topic":"Subject - specific topic","reminders":[{"text":"short reminder","due":"day or date, or empty string","quote":"the few verbatim words from the transcript where this was said"}]}. "topic" is a short label like "Physics - Thermodynamics"; if unclear, best guess. "reminders" holds only concrete things the student must remember or do: tests, quizzes, homework, projects, deadlines, or anything explicitly said to be due or on a test. Copy the day or date exactly as spoken. "quote" is a short exact phrase copied from the transcript so the moment can be found; keep it verbatim. If nothing qualifies, use an empty array. Never invent anything not in the transcript.',
         messages: [{ role: "user", content: note.text }],
         signal: ac.signal,
       });
@@ -5865,8 +5936,9 @@ function SchoolNotes({ ctx }) {
         .map((x) => {
           const text = String(x.text);
           const due = x.due ? String(x.due) : "";
+          const at = matchSegment(x.quote || text, note.segments); // audio timestamp, or null
           const added = ctx.addReminder(text, due || undefined); // returns the created reminder
-          return { text, due, reminderId: added?.id };
+          return { text, due, reminderId: added?.id, at };
         });
       if (items.length) ctx.toast(`${items.length} reminder${items.length > 1 ? "s" : ""} added`);
       // Persist topic + reminders onto the note itself.
@@ -5898,6 +5970,13 @@ function SchoolNotes({ ctx }) {
     }
     return [...by.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [hits]);
+
+  // Jump the open note's audio to a reminder's moment and play it.
+  const playAt = (t) => {
+    const a = noteAudioRef.current;
+    if (!a || t == null) return;
+    try { a.currentTime = Math.max(0, t); a.play(); } catch { /* not ready */ }
+  };
 
   const dayLabel = (key) => {
     if (key === "undated") return "Undated";
@@ -6049,9 +6128,20 @@ function SchoolNotes({ ctx }) {
                                 <div key={i} className="nx-tool-row nx-rem-row">
                                   <span className="nx-chip nx-chip-on nx-rem-badge"><Check size={11} />Added</span>
                                   <span className="nx-rem-text">{it.text}{it.due && <i> · {it.due}</i>}</span>
+                                  {n.audioUrl && it.at != null && (
+                                    <button className="nx-copy" title="Play the moment this was said"
+                                      onClick={() => playAt(it.at)}><Play size={11} />Replay</button>
+                                  )}
                                 </div>
                               ))}
                             </div>
+                          )}
+
+                          {n.audioUrl && (
+                            <>
+                              <div className="nx-out-head" style={{ marginTop: 14 }}><span>Recording</span></div>
+                              <audio ref={isOpen ? noteAudioRef : null} src={n.audioUrl} controls className="nx-note-audio" />
+                            </>
                           )}
 
                           <div className="nx-out-head" style={{ marginTop: 14 }}><span>Transcript</span></div>
@@ -11791,6 +11881,7 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-cal-edit{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--edge);
   border-radius:10px;background:rgba(2,4,9,0.4);}
 .nx-rem-done{text-decoration:line-through;opacity:0.55;}
+.nx-note-audio{width:100%;height:34px;margin-top:6px;border-radius:8px;}
 
 .nx-drop-zone{position:relative;border-radius:16px;transition:all .2s;}
 .nx-drop-field{border-style:dashed;}
