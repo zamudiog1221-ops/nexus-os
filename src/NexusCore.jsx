@@ -5760,7 +5760,30 @@ function SchoolNotes({ ctx }) {
   const segRef = useRef([]);
   const recStartRef = useRef(0);
   const noteAudioRef = useRef(null);
-  const [audio, setAudio] = useState(null); // pending draft's { url, segments } until saved
+  const [audio, setAudio] = useState(null); // pending draft's { url, dataUrl, segments } until saved
+  const [audioSrc, setAudioSrc] = useState({}); // noteId -> playable src, resolved lazily
+  const inv = (cmd, args) => (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke)?.(cmd, args);
+
+  // Mirror of audioSrc so the lazy loader can skip files it already has without
+  // re-fetching on every open.
+  const audioSrcRef = useRef({});
+  audioSrcRef.current = audioSrc;
+
+  // When a note with a saved recording is opened, load its audio file from disk
+  // (its own state key) into a playable data URL, cached by note id.
+  useEffect(() => {
+    if (open == null) return;
+    const n = notes.find((x) => x.id === open);
+    if (!n?.audioId || audioSrcRef.current[open]) return;
+    let alive = true;
+    inv("load_state", { key: n.audioId })?.then((raw) => {
+      if (!alive) return;
+      let durl = null;
+      try { durl = JSON.parse(raw); } catch { /* absent or corrupt */ }
+      if (durl) setAudioSrc((m) => (m[open] ? m : { ...m, [open]: durl }));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, notes]);
 
   const filterWords = useMemo(() => {
     const custom = extra.split(",").map((w) => w.trim().toLowerCase()).filter(Boolean);
@@ -5837,10 +5860,10 @@ function SchoolNotes({ ctx }) {
             const blob = new Blob(chunksRef.current, { type: mr.mimeType || "audio/webm" });
             const segments = segRef.current.slice();
             const url = URL.createObjectURL(blob);
-            // Persist the recording inline as a data URL so it survives a restart.
-            // Above ~20MB (a long class) keep it session-only, so the notes store
-            // doesn't balloon; disk-file storage is the fix for long recordings.
-            const CAP = 20 * 1024 * 1024;
+            // The recording is saved to its own file on disk (see save()), so a
+            // long class no longer bloats the notes store. Keep a generous safety
+            // cap only to avoid a runaway file.
+            const CAP = 250 * 1024 * 1024;
             if (blob.size > CAP) {
               setAudio({ url, dataUrl: null, segments });
               ctx.toast("Recording kept for this session (too large to save)");
@@ -5888,21 +5911,27 @@ function SchoolNotes({ ctx }) {
     const name = title.trim() || `Session ${new Date().toLocaleString(undefined,
       { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
     const now = new Date();
+    const noteId = Date.now();
     const note = {
-      id: Date.now(), title: name, text: clean, raw,
+      id: noteId, title: name, text: clean, raw,
       words: wordCount(clean), secs,
       day: now.toISOString().slice(0, 10),   // YYYY-MM-DD, the folder key
       at: now.getTime(),
       topic: null, summary: null, reminders: null,
-      // Persist the recording as a data URL so it replays after a restart;
-      // fall back to the session blob URL if the data URL isn't ready.
-      audioUrl: audio?.dataUrl || audio?.url || null,
+      // The recording lives in its own state file (key = audioId), so it stays
+      // out of the notes store. audioId is null for typed notes or if capture failed.
+      audioId: audio?.dataUrl ? `rec-${noteId}` : null,
       segments: audio?.segments || [],
       stripped: wordCount(raw) - wordCount(clean),
     };
+    // Write the recording to its own file on disk, keyed by audioId.
+    if (audio?.dataUrl && note.audioId) {
+      inv("save_state", { key: note.audioId, value: JSON.stringify(audio.dataUrl) })?.catch(() => {});
+      // Seed the cache with the live blob so it plays instantly this session.
+      if (audio.url) setAudioSrc((m) => ({ ...m, [noteId]: audio.url }));
+    }
     setNotes((p) => [note, ...p]);
     stop();
-    // Clear the draft WITHOUT revoking the audio URL  -  the note owns it now.
     bufRef.current = ""; segRef.current = [];
     setAudio(null);
     setFinalText(""); setInterim(""); setSecs(0); setTitle("");
@@ -6145,7 +6174,7 @@ function SchoolNotes({ ctx }) {
                                 <div key={i} className="nx-tool-row nx-rem-row">
                                   <span className="nx-chip nx-chip-on nx-rem-badge"><Check size={11} />Added</span>
                                   <span className="nx-rem-text">{it.text}{it.due && <i> · {it.due}</i>}</span>
-                                  {n.audioUrl && it.at != null && (
+                                  {(audioSrc[n.id] || n.audioUrl) && it.at != null && (
                                     <button className="nx-copy" title="Play the moment this was said"
                                       onClick={() => playAt(it.at)}><Play size={11} />Replay</button>
                                   )}
@@ -6154,10 +6183,12 @@ function SchoolNotes({ ctx }) {
                             </div>
                           )}
 
-                          {n.audioUrl && (
+                          {(n.audioId || n.audioUrl) && (
                             <>
                               <div className="nx-out-head" style={{ marginTop: 14 }}><span>Recording</span></div>
-                              <audio ref={isOpen ? noteAudioRef : null} src={n.audioUrl} controls className="nx-note-audio" />
+                              {(audioSrc[n.id] || n.audioUrl)
+                                ? <audio ref={isOpen ? noteAudioRef : null} src={audioSrc[n.id] || n.audioUrl} controls className="nx-note-audio" />
+                                : <p className="nx-msg-busy"><Loader2 size={13} className="nx-spin" />Loading recording</p>}
                             </>
                           )}
 
