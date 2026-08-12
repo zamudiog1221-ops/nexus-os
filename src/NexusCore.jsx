@@ -53,6 +53,9 @@ const MODULES = [
   { id: "school",      label: "School",        icon: GraduationCap, status: "live",
     summary: "Assignments, deadlines, and a study assistant that knows the material.",
     capabilities: ["Assignments", "Calendar", "Notes", "Flashcards", "Exam prep"] },
+  { id: "calendar",    label: "Calendar",      icon: CalendarDays, status: "live",
+    summary: "Your reminders and class deadlines on a real calendar you can edit.",
+    capabilities: ["Month view", "Edit deadlines", "Add reminders", "Mark done"] },
   { id: "encyclopedia", label: "Encyclopedia", icon: Library, status: "live",
     summary: "Look up a topic and get material actually worth studying from.",
     capabilities: ["Live web search", "Curated sources", "Saved topics", "Depth control"] },
@@ -9085,6 +9088,197 @@ function matchesCombo(e, combo) {
 
 /* Registry of modules that have a real surface. Everything absent
    from this map falls through to the placeholder view. */
+// Turn a free-text due ("Friday", "next Tuesday", "Oct 3", "10/3", ISO) into a
+// real local-midnight Date, resolved relative to when the reminder was made.
+// Returns null when it can't be pinned to a day (those show as Unscheduled).
+function resolveDue(due, baseTs) {
+  if (!due) return null;
+  const s = String(due).trim().toLowerCase();
+  if (!s) return null;
+  const base = baseTs ? new Date(baseTs) : new Date();
+  base.setHours(0, 0, 0, 0);
+  const mk = (d) => { d.setHours(0, 0, 0, 0); return d; };
+
+  if (/\btoday\b|\btonight\b/.test(s)) return mk(new Date(base));
+  if (/\btomorrow\b/.test(s)) { const d = new Date(base); d.setDate(d.getDate() + 1); return mk(d); }
+
+  const iso = s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (iso) { const d = new Date(`${iso[0]}T00:00:00`); if (!isNaN(d)) return mk(d); }
+
+  const dows = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const wd = dows.findIndex((n) => s.includes(n));
+  if (wd >= 0) {
+    const d = new Date(base);
+    let delta = (wd - d.getDay() + 7) % 7;
+    if (delta === 0) delta = 7; // "Friday" means the coming Friday, not today
+    d.setDate(d.getDate() + delta);
+    return mk(d);
+  }
+
+  const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const mm = s.match(/([a-z]{3,})\.?\s+(\d{1,2})/);
+  if (mm) {
+    const mi = months.findIndex((mo) => mm[1].startsWith(mo));
+    const day = parseInt(mm[2], 10);
+    if (mi >= 0 && day >= 1 && day <= 31) {
+      let d = new Date(base.getFullYear(), mi, day);
+      if (d < base) d = new Date(base.getFullYear() + 1, mi, day);
+      return mk(d);
+    }
+  }
+
+  const nm = s.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/);
+  if (nm) {
+    const mo = parseInt(nm[1], 10) - 1, day = parseInt(nm[2], 10);
+    let year = nm[3] ? parseInt(nm[3], 10) : base.getFullYear();
+    if (year < 100) year += 2000;
+    if (mo >= 0 && mo <= 11 && day >= 1 && day <= 31) {
+      let d = new Date(year, mo, day);
+      if (!nm[3] && d < base) d = new Date(year + 1, mo, day);
+      return mk(d);
+    }
+  }
+  return null;
+}
+
+const calKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+function CalendarView({ ctx }) {
+  const reminders = ctx.reminders || [];
+  const [monthOffset, setMonthOffset] = useState(0);
+  const [selKey, setSelKey] = useState(calKey(new Date()));
+  const [draft, setDraft] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [editText, setEditText] = useState("");
+  const [editDue, setEditDue] = useState("");
+
+  const view = new Date();
+  view.setDate(1); view.setMonth(view.getMonth() + monthOffset); view.setHours(0, 0, 0, 0);
+  const y = view.getFullYear(), m = view.getMonth();
+  const firstDow = new Date(y, m, 1).getDay();
+  const days = new Date(y, m + 1, 0).getDate();
+  const cells = [...Array(firstDow).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)];
+  const todayKey = calKey(new Date());
+
+  const byDay = useMemo(() => {
+    const map = new Map();
+    for (const r of reminders) {
+      const d = resolveDue(r.due, r.at);
+      if (!d) continue;
+      const k = calKey(d);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(r);
+    }
+    return map;
+  }, [reminders]);
+
+  const unscheduled = reminders.filter((r) => !resolveDue(r.due, r.at));
+  const selList = selKey ? (byDay.get(selKey) || []) : [];
+  const selNice = selKey
+    ? new Date(`${selKey}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })
+    : "";
+
+  const beginEdit = (r) => { setEditing(r.id); setEditText(r.text); setEditDue(r.due || ""); };
+  const saveEdit = () => {
+    ctx.updateReminder(editing, { text: editText.trim() || "(untitled)", due: editDue.trim() || null });
+    setEditing(null); ctx.toast("Reminder updated");
+  };
+  const addToSel = () => {
+    if (!draft.trim() || !selKey) return;
+    ctx.addReminder(draft.trim(), selKey); // ISO due lands exactly on the day
+    setDraft(""); ctx.toast("Reminder added");
+  };
+
+  return (
+    <div className="nx-mod nx-cal-mod">
+      <div className="nx-cal-wrap">
+        <div className="nx-cal-main">
+          <div className="nx-cal-nav">
+            <button className="nx-chip" onClick={() => setMonthOffset((o) => o - 1)}><Minus size={12} /></button>
+            <span className="nx-cal-month">{view.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</span>
+            <button className="nx-chip" onClick={() => setMonthOffset((o) => o + 1)}><Plus size={12} /></button>
+            {monthOffset !== 0 && <button className="nx-chip" onClick={() => setMonthOffset(0)}>Today</button>}
+          </div>
+          <div className="nx-calm-grid">
+            {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => <span key={`h${i}`} className="nx-calm-dow">{d}</span>)}
+            {cells.map((d, i) => {
+              if (!d) return <span key={`e${i}`} className="nx-calm-cell nx-calm-empty" />;
+              const k = calKey(new Date(y, m, d));
+              const list = byDay.get(k) || [];
+              const open = list.filter((r) => !r.done).length;
+              return (
+                <button key={k} className={`nx-calm-cell${k === todayKey ? " nx-calm-today" : ""}${k === selKey ? " nx-calm-sel" : ""}`}
+                  onClick={() => setSelKey(k)}>
+                  <span className="nx-calm-num">{d}</span>
+                  {open > 0 && <span className="nx-calm-dot">{open}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="nx-cal-side">
+          <div className="nx-out-head"><span>{selNice || "Pick a day"}</span></div>
+          {selKey && (
+            <div className="nx-tool-row">
+              <input className="nx-inline nx-inline-wide" value={draft} onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addToSel()} placeholder="Add for this day" />
+              <button className="nx-chip nx-chip-on" onClick={addToSel}><Plus size={12} /></button>
+            </div>
+          )}
+          {selList.length === 0 && <p className="nx-tool-note nx-tool-note-flush">Nothing on this day.</p>}
+          <div className="nx-rem-list">
+            {selList.map((r) => editing === r.id ? (
+              <div key={r.id} className="nx-cal-edit">
+                <input className="nx-inline nx-inline-wide" value={editText} onChange={(e) => setEditText(e.target.value)} placeholder="Reminder" />
+                <input className="nx-inline nx-inline-wide" value={editDue} onChange={(e) => setEditDue(e.target.value)} placeholder="Due (e.g. Friday, Oct 3)" />
+                <div className="nx-tool-row">
+                  <button className="nx-chip nx-chip-on" onClick={saveEdit}><Check size={12} />Save</button>
+                  <button className="nx-chip" onClick={() => setEditing(null)}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div key={r.id} className="nx-tool-row nx-rem-row">
+                <button className={`nx-chip${r.done ? " nx-chip-on" : ""}`} onClick={() => ctx.toggleReminder(r.id)}>
+                  {r.done ? <Check size={11} /> : <CircleDot size={11} />}
+                </button>
+                <span className={`nx-rem-text${r.done ? " nx-rem-done" : ""}`}>{r.text}{r.due && <i> · {r.due}</i>}</span>
+                <button className="nx-copy" onClick={() => beginEdit(r)}><Pencil size={11} /></button>
+                <button className="nx-copy nx-copy-fail" onClick={() => ctx.removeReminder(r.id)}><Trash2 size={11} /></button>
+              </div>
+            ))}
+          </div>
+
+          {unscheduled.length > 0 && (
+            <>
+              <div className="nx-out-head" style={{ marginTop: 16 }}><span>Unscheduled</span></div>
+              <div className="nx-rem-list">
+                {unscheduled.map((r) => (
+                  <div key={r.id} className="nx-tool-row nx-rem-row">
+                    <span className={`nx-rem-text${r.done ? " nx-rem-done" : ""}`}>{r.text}{r.due && <i> · {r.due}</i>}</span>
+                    <button className="nx-copy" onClick={() => beginEdit(r)}><Pencil size={11} /></button>
+                    <button className="nx-copy nx-copy-fail" onClick={() => ctx.removeReminder(r.id)}><Trash2 size={11} /></button>
+                  </div>
+                ))}
+              </div>
+              {editing && unscheduled.some((r) => r.id === editing) && (
+                <div className="nx-cal-edit" style={{ marginTop: 8 }}>
+                  <input className="nx-inline nx-inline-wide" value={editText} onChange={(e) => setEditText(e.target.value)} placeholder="Reminder" />
+                  <input className="nx-inline nx-inline-wide" value={editDue} onChange={(e) => setEditDue(e.target.value)} placeholder="Due (e.g. Friday, Oct 3)" />
+                  <div className="nx-tool-row">
+                    <button className="nx-chip nx-chip-on" onClick={saveEdit}><Check size={12} />Save</button>
+                    <button className="nx-chip" onClick={() => setEditing(null)}>Cancel</button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const VIEWS = {
   assistant: AssistantView,
   agent: AgentMode,
@@ -9094,6 +9288,7 @@ const VIEWS = {
   projects: ProjectsView,
   files: FilesView,
   school: SchoolView,
+  calendar: CalendarView,
   encyclopedia: EncyclopediaView,
   engineering: EngineeringView,
   fitness: FitnessView,
@@ -10214,6 +10409,8 @@ export default function NexusCore() {
     setReminders((p) => p.map((r) => r.id === id ? { ...r, done: !r.done } : r)), [setReminders]);
   const removeReminder = useCallback((id) =>
     setReminders((p) => p.filter((r) => r.id !== id)), [setReminders]);
+  const updateReminder = useCallback((id, patch) =>
+    setReminders((p) => p.map((r) => r.id === id ? { ...r, ...patch } : r)), [setReminders]);
 
   // Shared workout store  -  Fitness reads/writes it, the assistant can log to it.
   const [workouts, setWorkouts] = usePersistent("fit-workouts", []);
@@ -10238,7 +10435,7 @@ export default function NexusCore() {
 
   const ctx = useMemo(() => ({
     t, online, demo, go, toast, active, settings, setSettings,
-    reminders, addReminder, toggleReminder, removeReminder,
+    reminders, addReminder, toggleReminder, removeReminder, updateReminder,
     workouts, setWorkouts, logWorkout,
     launchApps, setLaunchApps,
     projects, filesFolder,
@@ -10246,7 +10443,7 @@ export default function NexusCore() {
     openAbout: () => setAboutOpen(true),
     chat, setChat,
   }), [t, online, demo, go, toast, active, settings,
-      reminders, addReminder, toggleReminder, removeReminder, workouts, setWorkouts, logWorkout,
+      reminders, addReminder, toggleReminder, removeReminder, updateReminder, workouts, setWorkouts, logWorkout,
       launchApps, setLaunchApps, projects, filesFolder, chat, setChat]);
 
   // Sound: keep the engine in sync with settings, then let it listen
@@ -11574,6 +11771,26 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   border:1px solid var(--edge);border-radius:8px;padding:0 6px;font-size:10px;}
 .nx-vnote-topic{font-size:11px;color:var(--signal);background:var(--glow-faint);
   border:1px solid var(--edge);border-radius:8px;padding:1px 7px;margin-right:8px;white-space:nowrap;}
+.nx-cal-wrap{display:grid;grid-template-columns:1.6fr 1fr;gap:18px;align-items:start;}
+@media (max-width:900px){.nx-cal-wrap{grid-template-columns:1fr;}}
+.nx-cal-nav{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.nx-cal-month{font-size:15px;color:var(--text);font-weight:500;letter-spacing:0.01em;}
+.nx-calm-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
+.nx-calm-dow{text-align:center;font-size:10px;color:var(--muted-2);letter-spacing:0.08em;padding-bottom:4px;}
+.nx-calm-cell{position:relative;aspect-ratio:1;border:1px solid var(--edge);border-radius:10px;
+  background:rgba(2,4,9,0.35);color:var(--muted);cursor:pointer;transition:all .12s;
+  display:flex;align-items:flex-start;justify-content:flex-start;padding:6px 8px;}
+.nx-calm-cell:hover{border-color:var(--muted-2);}
+.nx-calm-empty{border:none;background:none;cursor:default;}
+.nx-calm-num{font-size:12px;}
+.nx-calm-today{border-color:var(--signal);color:var(--text);}
+.nx-calm-sel{background:var(--glow-faint);border-color:var(--signal);}
+.nx-calm-dot{position:absolute;bottom:5px;right:6px;min-width:16px;height:16px;padding:0 4px;
+  border-radius:8px;background:var(--signal);color:#02121a;font-size:10px;font-weight:600;
+  display:flex;align-items:center;justify-content:center;}
+.nx-cal-edit{display:flex;flex-direction:column;gap:6px;padding:8px;border:1px solid var(--edge);
+  border-radius:10px;background:rgba(2,4,9,0.4);}
+.nx-rem-done{text-decoration:line-through;opacity:0.55;}
 
 .nx-drop-zone{position:relative;border-radius:16px;transition:all .2s;}
 .nx-drop-field{border-style:dashed;}
