@@ -82,6 +82,22 @@ Feature-behavior changes (actually implementing the Linux wifi/arp) intentionall
 
 Next: on the school PC — npm run tauri dev (first real Rust compile, will check platform.rs + last session's changes), then commit and push.
 
+2026-08-12 — First clean compile + GitHub (work session)
+
+Did:
+
+Settled the two-machine plan: PC 1 (personal, 8GB, admin, has build tools) = dev + compile; PC 2 (school, 16GB DDR5, VirtualBox) = Linux VM host later; GitHub = sync pipe.
+Hit an admin wall installing the Rust/MSVC toolchain on PC 2 (no admin). Resolved by moving all dev to PC 1, which already had the build tools from earlier Nexus work.
+Committed all outstanding work (a12af03) and published the repo to GitHub — private, zamudiog1221-ops/nexus-os. First time the project has offsite backup + version control across machines.
+Ran `npm run tauri dev` on PC 1 — compiled clean and the app launched. This is the first successful build since the last two sessions' work (notifications, run history, cost tracking, agent handoff, idle timeout) plus this week's changes (platform.rs, quick fixes, comment scrub). All of it holds together.
+
+Learned / noted:
+
+The whole "compile on the school PC" plan was a dead end — locked-down machine, no admin for MSVC. PC 1 with admin is the right dev box. School PC's only real job is being the VM host (more RAM, VirtualBox already installed).
+GitHub is now the pipe between the two machines — commit/push on PC 1, pull on PC 2 when Linux work starts.
+
+Next: quick smoke-test of the features that had never actually run (notifications, run history, cost, agent handoff, model-picker persistence), then start Phase 1 / Linux prep.
+
 Template
 ## YYYY-MM-DD — Short title (~Nh)
 

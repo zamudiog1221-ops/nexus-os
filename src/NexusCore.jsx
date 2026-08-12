@@ -5707,7 +5707,10 @@ const wordCount = (t) => (t.trim() ? t.trim().split(/\s+/).length : 0);
 
 function SchoolNotes({ ctx }) {
   const { demo } = ctx;
-  const [notes, setNotes] = useState([]);
+  // Persisted to disk so notes, summaries and extracted reminders survive a
+  // restart. Each note carries its own summary/topic/reminders, so those
+  // outlive the session too.
+  const [notes, setNotes] = usePersistent("voice-notes", []);
   const [live, setLive] = useState(false);
   const [finalText, setFinalText] = useState("");
   const [interim, setInterim] = useState("");
@@ -5719,12 +5722,14 @@ function SchoolNotes({ ctx }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(null);
   const [sums, setSums] = useState({});
+  const [rem, setRem] = useState({});
 
   const recRef = useRef(null);
   const wantRef = useRef(false);
   const bufRef = useRef("");
   const tickRef = useRef(null);
   const abortRef = useRef(null);
+  const remAbortRef = useRef(null);
 
   const filterWords = useMemo(() => {
     const custom = extra.split(",").map((w) => w.trim().toLowerCase()).filter(Boolean);
@@ -5736,6 +5741,7 @@ function SchoolNotes({ ctx }) {
     try { recRef.current?.stop(); } catch { /* already stopped */ }
     clearInterval(tickRef.current);
     abortRef.current?.abort();
+    remAbortRef.current?.abort();
   }, []);
 
   const start = () => {
@@ -5798,13 +5804,21 @@ function SchoolNotes({ ctx }) {
     const clean = scrub(raw, filterWords);
     const name = title.trim() || `Session ${new Date().toLocaleString(undefined,
       { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
-    setNotes((p) => [{
+    const now = new Date();
+    const note = {
       id: Date.now(), title: name, text: clean, raw,
-      words: wordCount(clean), secs, when: "now",
+      words: wordCount(clean), secs,
+      day: now.toISOString().slice(0, 10),   // YYYY-MM-DD, the folder key
+      at: now.getTime(),
+      topic: null, summary: null, reminders: null,
       stripped: wordCount(raw) - wordCount(clean),
-    }, ...p]);
+    };
+    setNotes((p) => [note, ...p]);
     stop(); reset();
     ctx.toast("Note saved");
+    // Automatically detect the topic, pull tests/deadlines, and add them
+    // straight to the reminder list. No button, no confirm.
+    autoExtract(note);
   };
 
   const summarize = async (note) => {
@@ -5818,10 +5832,49 @@ function SchoolNotes({ ctx }) {
         messages: [{ role: "user", content: note.text }],
         signal: ac.signal,
       });
-      setSums((s) => ({ ...s, [note.id]: { text } }));
+      setNotes((p) => p.map((x) => x.id === note.id ? { ...x, summary: text } : x));
+      setSums((s) => ({ ...s, [note.id]: {} }));
     } catch (e) {
       if (e.name === "AbortError") return;
       setSums((s) => ({ ...s, [note.id]: { err: e.message || "Could not reach the engine." } }));
+    }
+  };
+
+  // Pull anything the class flagged as a test, deadline, or assignment and add
+  // each straight to the real reminder list  -  automatic, no confirm step.
+  // Runs on save, and can be re-run manually from the note if the class was edited.
+  const autoExtract = async (note) => {
+    setRem((s) => ({ ...s, [note.id]: { busy: true } }));
+    remAbortRef.current?.abort();
+    const ac = new AbortController();
+    remAbortRef.current = ac;
+    try {
+      const raw = await askClaude({
+        system: 'You are given a rough class transcript. Return ONLY a JSON object, no prose and no code fences, shaped {"topic":"Subject - specific topic","reminders":[{"text":"short reminder","due":"day or date, or empty string"}]}. "topic" is a short label like "Physics - Thermodynamics" or "US History - Civil War"; if unclear, use a best guess from the content. "reminders" holds only concrete things the student must remember or do: tests, quizzes, homework, projects, deadlines, or anything explicitly said to be due or on a test. Copy the day or date exactly as spoken (e.g. "Friday", "next Tuesday", "Oct 3"). If nothing qualifies, use an empty array. Never invent anything not in the transcript.',
+        messages: [{ role: "user", content: note.text }],
+        signal: ac.signal,
+      });
+      const clean = raw.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+      const parsed = JSON.parse(clean);
+      const topic = parsed && typeof parsed.topic === "string" ? parsed.topic.trim() : "";
+      const items = (Array.isArray(parsed?.reminders) ? parsed.reminders : [])
+        .filter((x) => x && x.text)
+        .map((x) => {
+          const text = String(x.text);
+          const due = x.due ? String(x.due) : "";
+          const added = ctx.addReminder(text, due || undefined); // returns the created reminder
+          return { text, due, reminderId: added?.id };
+        });
+      if (items.length) ctx.toast(`${items.length} reminder${items.length > 1 ? "s" : ""} added`);
+      // Persist topic + reminders onto the note itself.
+      setNotes((p) => p.map((x) => x.id === note.id
+        ? { ...x, topic: topic || x.topic, reminders: items } : x));
+      setRem((s) => ({ ...s, [note.id]: {} }));
+    } catch (e) {
+      if (e.name === "AbortError") return;
+      setRem((s) => ({ ...s, [note.id]: { err: e instanceof SyntaxError
+        ? "Couldn't read the reminders back. Open the note and hit Re-scan."
+        : (e.message || "Could not reach the engine.") } }));
     }
   };
 
@@ -5831,6 +5884,27 @@ function SchoolNotes({ ctx }) {
 
   const draft = finalText + interim;
   const preview = filterWords.length ? scrub(draft, filterWords) : draft;
+
+  // Auto-organize the notes into day folders, newest day first.
+  const grouped = useMemo(() => {
+    const by = new Map();
+    for (const n of hits) {
+      const key = n.day || "undated";
+      if (!by.has(key)) by.set(key, []);
+      by.get(key).push(n);
+    }
+    return [...by.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+  }, [hits]);
+
+  const dayLabel = (key) => {
+    if (key === "undated") return "Undated";
+    const d = new Date(key + "T00:00:00");
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const diff = Math.round((today - d) / 86400000);
+    if (diff === 0) return "Today";
+    if (diff === 1) return "Yesterday";
+    return d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+  };
 
   return (
     <div className="nx-tool">
@@ -5905,51 +5979,88 @@ function SchoolNotes({ ctx }) {
             <span className="nx-fcount">{hits.length} of {notes.length}</span>
           </div>
 
-          <div className="nx-notes">
-            {hits.map((n) => {
-              const sum = sums[n.id];
-              const isOpen = open === n.id;
-              return (
-                <div key={n.id} className="nx-vnote">
-                  <button className="nx-vnote-head" onClick={() => setOpen(isOpen ? null : n.id)}>
-                    <CircleDot size={11} />
-                    <span className="nx-vnote-title">{n.title}</span>
-                    <span className="nx-vnote-meta">
-                      {n.words}w · {Math.floor(n.secs / 60)}m
-                      {n.stripped > 0 && <i> · {n.stripped} stripped</i>}
-                    </span>
-                    <em>{n.when}</em>
-                  </button>
+          {grouped.map(([day, dayNotes]) => (
+            <div key={day} className="nx-day-group">
+              <div className="nx-day-head">
+                <Folder size={12} />{dayLabel(day)}<em>{dayNotes.length}</em>
+              </div>
+              <div className="nx-notes">
+                {dayNotes.map((n) => {
+                  const sum = sums[n.id];
+                  const r = rem[n.id];
+                  const isOpen = open === n.id;
+                  return (
+                    <div key={n.id} className="nx-vnote">
+                      <button className="nx-vnote-head" onClick={() => setOpen(isOpen ? null : n.id)}>
+                        <CircleDot size={11} />
+                        <span className="nx-vnote-title">{n.title}</span>
+                        {n.topic && <span className="nx-vnote-topic">{n.topic}</span>}
+                        <span className="nx-vnote-meta">
+                          {n.words}w · {Math.floor(n.secs / 60)}m
+                          {n.stripped > 0 && <i> · {n.stripped} stripped</i>}
+                        </span>
+                      </button>
 
-                  {isOpen && (
-                    <div className="nx-vnote-body">
-                      <div className="nx-out-head">
-                        <span>Summary</span>
-                        <div className="nx-tool-row">
-                          {!sum?.busy && (
-                            <button className="nx-copy" onClick={() => summarize(n)}>
-                              <Sparkles size={11} />{sum?.text ? "Redo" : "Summarize"}
+                      {isOpen && (
+                        <div className="nx-vnote-body">
+                          <div className="nx-out-head">
+                            <span>Summary</span>
+                            <div className="nx-tool-row">
+                              <CopyBtn value={n.text} />
+                              <button className="nx-copy nx-copy-fail"
+                                onClick={() => setNotes((p) => p.filter((x) => x.id !== n.id))}>
+                                <Trash2 size={11} />Delete
+                              </button>
+                            </div>
+                          </div>
+                          {sum?.busy && <p className="nx-msg-busy"><Loader2 size={13} className="nx-spin" />Reading it back</p>}
+                          {sum?.err && <p className="nx-out-err">{sum.err}</p>}
+                          {!sum?.busy && !n.summary && (
+                            <button className="nx-cta nx-sum-cta" onClick={() => summarize(n)}>
+                              <Sparkles size={16} />Summarize this class
                             </button>
                           )}
-                          <CopyBtn value={n.text} />
-                          <button className="nx-copy nx-copy-fail"
-                            onClick={() => setNotes((p) => p.filter((x) => x.id !== n.id))}>
-                            <Trash2 size={11} />Delete
-                          </button>
-                        </div>
-                      </div>
-                      {sum?.busy && <p className="nx-msg-busy"><Loader2 size={13} className="nx-spin" />Reading it back</p>}
-                      {sum?.err && <p className="nx-out-err">{sum.err}</p>}
-                      {sum?.text && <div className="nx-fp-sum-body"><MsgText text={sum.text} /></div>}
+                          {n.summary && (
+                            <>
+                              <div className="nx-fp-sum-body"><MsgText text={n.summary} /></div>
+                              <button className="nx-copy nx-sum-redo" onClick={() => summarize(n)}>
+                                <Sparkles size={11} />Redo summary
+                              </button>
+                            </>
+                          )}
 
-                      <div className="nx-out-head" style={{ marginTop: 14 }}><span>Transcript</span></div>
-                      <pre className="nx-fp-pre">{n.text}</pre>
+                          <div className="nx-out-head" style={{ marginTop: 14 }}>
+                            <span>Reminders</span>
+                            {!r?.busy && (
+                              <button className="nx-copy" onClick={() => autoExtract(n)}>
+                                <Bell size={11} />Re-scan
+                              </button>
+                            )}
+                          </div>
+                          {r?.busy && <p className="nx-msg-busy"><Loader2 size={13} className="nx-spin" />Scanning for dates and deadlines</p>}
+                          {r?.err && <p className="nx-out-err">{r.err}</p>}
+                          {n.reminders && n.reminders.length === 0 && <p className="nx-tool-note nx-tool-note-flush">Nothing that looked like a test or deadline.</p>}
+                          {n.reminders?.length > 0 && (
+                            <div className="nx-rem-list">
+                              {n.reminders.map((it, i) => (
+                                <div key={i} className="nx-tool-row nx-rem-row">
+                                  <span className="nx-chip nx-chip-on nx-rem-badge"><Check size={11} />Added</span>
+                                  <span className="nx-rem-text">{it.text}{it.due && <i> · {it.due}</i>}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="nx-out-head" style={{ marginTop: 14 }}><span>Transcript</span></div>
+                          <pre className="nx-fp-pre">{n.text}</pre>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </>
       )}
     </div>
@@ -11449,6 +11560,20 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-vnote-head em{font-style:normal;font-family:var(--mono);font-size:9.5px;color:var(--muted-2);}
 .nx-vnote-body{padding:14px 15px 16px;background:rgba(2,4,9,0.4);
   border-top:1px solid var(--edge);animation:nx-rise .2s ease;}
+.nx-rem-list{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+.nx-rem-row{align-items:center;gap:9px;}
+.nx-rem-text{font-size:12.5px;color:var(--muted);line-height:1.4;}
+.nx-rem-text i{color:var(--muted-2);font-style:normal;}
+.nx-rem-badge{pointer-events:none;flex:none;}
+.nx-sum-cta{width:100%;justify-content:center;gap:8px;margin-top:4px;font-size:14px;padding:12px;}
+.nx-sum-redo{margin-top:8px;}
+.nx-day-group{margin-top:14px;}
+.nx-day-head{display:flex;align-items:center;gap:7px;font-size:11px;text-transform:uppercase;
+  letter-spacing:0.09em;color:var(--muted-2);margin-bottom:7px;padding-left:2px;}
+.nx-day-head em{font-style:normal;color:var(--muted-2);opacity:0.7;
+  border:1px solid var(--edge);border-radius:8px;padding:0 6px;font-size:10px;}
+.nx-vnote-topic{font-size:11px;color:var(--signal);background:var(--glow-faint);
+  border:1px solid var(--edge);border-radius:8px;padding:1px 7px;margin-right:8px;white-space:nowrap;}
 
 .nx-drop-zone{position:relative;border-radius:16px;transition:all .2s;}
 .nx-drop-field{border-style:dashed;}

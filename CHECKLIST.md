@@ -4,12 +4,13 @@
 NexusOS runs as a bootable Linux drive — one graded module taken to real, measurable depth, inside a working AI command center that plans and runs jobs on its own and keeps private work local and free (Ollama) with natural voice (ElevenLabs). The Linux port is the gate: nothing downstream (ISO, kiosk, hardware) is possible until the binary runs on Linux.
 
 ## Now — Unblock and Stabilize
-- [ ] Run `npm run tauri dev` and get last session's Rust changes to compile
-- [ ] Test idle timeout on a long command
-- [ ] Test the ask_human handoff card end to end
-- [ ] Test Stop while a run is paused
-- [ ] Commit current changes
-- [ ] Push repo to GitHub
+- [x] Run `npm run tauri dev` — compiles clean, app runs (PC 1)
+- [x] Commit current changes
+- [x] Push repo to GitHub (private: zamudiog1221-ops/nexus-os)
+- [x] Smoke-test previously-unrun features: notifications, run history, cost tracking
+- [x] Test the ask_human handoff card end to end
+- [x] Test Stop while a run is paused
+- [x] Confirm quick fixes: model picker persists across restart; assistant doesn't quit early / truncate
 
 ## Quick Fixes
 - [x] Raise assistant tool loop from 5 to 10 (both text + voice loops)
