@@ -5341,7 +5341,7 @@ function FilesView({ ctx }) {
   const [summaries, setSummaries] = useState({});
   const [indexing, setIndexing] = useState(false);
   const [folder, setFolder] = usePersistent("files-folder", "");
-  const [voiceNotes] = usePersistent("voice-notes", []); // fold Voice Notes in as artifacts
+  const voiceNotes = ctx.voiceNotes || []; // shared live store, folded in as artifacts
   const [reindex, setReindex] = useState(false); // show the folder-index screen on demand
   const [pathInput, setPathInput] = useState("");
   const [idxErr, setIdxErr] = useState(null);
@@ -5891,10 +5891,11 @@ function matchSegment(quote, segments) {
 
 function SchoolNotes({ ctx }) {
   const { demo } = ctx;
-  // Persisted to disk so notes, summaries and extracted reminders survive a
-  // restart. Each note carries its own summary/topic/reminders, so those
-  // outlive the session too.
-  const [notes, setNotes] = usePersistent("voice-notes", []);
+  // Shared live store (lifted to the shell), persisted to disk so notes,
+  // summaries and extracted reminders survive a restart and stay in sync with
+  // the Files module. Each note carries its own summary/topic/reminders.
+  const notes = ctx.voiceNotes || [];
+  const setNotes = ctx.setVoiceNotes;
   const [live, setLive] = useState(false);
   const [finalText, setFinalText] = useState("");
   const [interim, setInterim] = useState("");
@@ -10767,6 +10768,9 @@ export default function NexusCore() {
   // Shared reminders/tasks store  -  the assistant writes to it, the dashboard
   // task widget reads from it, and it persists across launches.
   const [reminders, setReminders] = usePersistent("reminders", []);
+  // Voice notes live at the shell so Voice Notes and Files share one live copy
+  // (each module stays mounted, so a per-module copy would go stale).
+  const [voiceNotes, setVoiceNotes] = usePersistent("voice-notes", []);
   const addReminder = useCallback((text, due) => {
     const item = { id: Date.now() + Math.random(), text: String(text).slice(0, 200),
       due: due || null, done: false, at: Date.now() };
@@ -10804,6 +10808,7 @@ export default function NexusCore() {
   const ctx = useMemo(() => ({
     t, online, demo, go, toast, active, settings, setSettings,
     reminders, addReminder, toggleReminder, removeReminder, updateReminder,
+    voiceNotes, setVoiceNotes,
     workouts, setWorkouts, logWorkout,
     launchApps, setLaunchApps,
     projects, filesFolder,
@@ -10811,7 +10816,8 @@ export default function NexusCore() {
     openAbout: () => setAboutOpen(true),
     chat, setChat,
   }), [t, online, demo, go, toast, active, settings,
-      reminders, addReminder, toggleReminder, removeReminder, updateReminder, workouts, setWorkouts, logWorkout,
+      reminders, addReminder, toggleReminder, removeReminder, updateReminder, voiceNotes, setVoiceNotes,
+      workouts, setWorkouts, logWorkout,
       launchApps, setLaunchApps, projects, filesFolder, chat, setChat]);
 
   // Keep-alive: every module you open stays mounted (just hidden) so its state
