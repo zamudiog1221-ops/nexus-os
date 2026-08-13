@@ -1352,10 +1352,21 @@ function OrbitDashboard({ ctx, layout, setLayout, edit }) {
   };
   const removeWidget = (id) => setLayout((p) => p.filter((x) => x.id !== id));
 
-  const cellUnder = (x, y) => {
-    const el = document.elementFromPoint(x, y);
-    const cell = el && el.closest && el.closest("[data-wid]");
-    return cell ? cell.getAttribute("data-wid") : null;
+  // Forgiving target: the nearest SAME-SIZE widget to the pointer, so you can
+  // just drag in a direction and drop anywhere - it snaps to the closest one it
+  // can swap with (which keeps sizes intact). No need to land exactly on it.
+  const nearestSwappable = (x, y, id) => {
+    const g = groupOfId(id);
+    let best = null, bestD = Infinity;
+    document.querySelectorAll("[data-wid]").forEach((el) => {
+      const tid = el.getAttribute("data-wid");
+      if (tid === id || groupOfId(tid) !== g) return;
+      const r = el.getBoundingClientRect();
+      const dx = r.left + r.width / 2 - x, dy = r.top + r.height / 2 - y;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) { bestD = d; best = tid; }
+    });
+    return best;
   };
 
   const startDrag = (e, id) => {
@@ -1363,15 +1374,11 @@ function OrbitDashboard({ ctx, layout, setLayout, edit }) {
     e.preventDefault();
     dragIdRef.current = id;
     setDragId(id);
-    const move = (ev) => {
-      const t = cellUnder(ev.clientX, ev.clientY);
-      // Only highlight a target you can actually swap with (same size).
-      setOverId(t && groupOfId(t) === groupOfId(dragIdRef.current) ? t : null);
-    };
+    const move = (ev) => setOverId(nearestSwappable(ev.clientX, ev.clientY, dragIdRef.current));
     const up = (ev) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      const target = cellUnder(ev.clientX, ev.clientY);
+      const target = nearestSwappable(ev.clientX, ev.clientY, dragIdRef.current);
       if (target) swap(dragIdRef.current, target);
       dragIdRef.current = null;
       setDragId(null);
