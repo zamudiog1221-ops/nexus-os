@@ -73,6 +73,10 @@ NexusOS runs as a bootable Linux drive — one graded module taken to real, meas
 - [ ] Agent run: pull a local model
 - [ ] Point the assistant at the local Ollama model
 
+## Lightbulbs / polish (later)
+- [ ] Fix wrong widget values: Connection "0 ms round trip" (should be real latency to gateway) and System health "0°C" temperature (sensor reading 0 — not being read on this machine)
+- [ ] Jarvis-style launch animation: opens small and spreads outward on app start (Gio to send a reference)
+
 ## Open — next session (priority order)
 - [ ] FIX Ubuntu VM boot (PC 2): EFI lost the ubuntu entry ("No bootable device", only PXE shows). Use EFI Shell: FS0: / cd EFI\ubuntu / shimx64.efi. Then permanent: copy shimx64.efi to /boot/efi/EFI/BOOT/BOOTX64.EFI. If no shell, boot ISO → Try Ubuntu → boot-repair.
 - [ ] Then Guest Additions for fullscreen (sed out cdrom source first, then virtualbox-guest-utils + -x11, reboot)
