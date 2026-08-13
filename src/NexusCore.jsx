@@ -5317,16 +5317,22 @@ function FilePreview({ file, summary, onSummarize, onTag, onDropTag, onFav, ctx 
             </div>}
       </div>
 
-      <button className="nx-chip" onClick={async () => {
-        const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
-        if (!isDesktop) { ctx.toast("Opening files works in the desktop app."); return; }
-        try {
-          const inv = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
-          await inv("launch_app", { target: file.id }); // file.id is the real path
-        } catch (e) { ctx.toast(String(e?.message || e).slice(0, 80)); }
-      }}>
-        Open file
-      </button>
+      {/* Voice Notes are in-app artifacts with no disk file, so "Open" would try
+          to launch a bogus path. Show a jump-to-module link for them instead. */}
+      {file.source === "Voice Notes"
+        ? <button className="nx-chip" onClick={() => ctx.go("school")}>
+            <Mic size={11} />Open in Voice Notes
+          </button>
+        : <button className="nx-chip" onClick={async () => {
+            const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
+            if (!isDesktop) { ctx.toast("Opening files works in the desktop app."); return; }
+            try {
+              const inv = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+              await inv("launch_app", { target: file.id }); // file.id is the real path
+            } catch (e) { ctx.toast(String(e?.message || e).slice(0, 80)); }
+          }}>
+            Open file
+          </button>}
     </div>
   );
 }
