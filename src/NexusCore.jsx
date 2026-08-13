@@ -259,16 +259,27 @@ function ClockBody() {
   );
 }
 
+// Small throughput values round to 0 in Mb/s, which looks broken. Show Kb/s
+// under 1 Mb/s and a decimal under 10, so light traffic still reads honestly.
+function fmtRate(mbps) {
+  if (mbps == null) return { n: "——", u: "Mb/s" };
+  if (mbps < 1) return { n: Math.round(mbps * 1000), u: "Kb/s" };
+  if (mbps < 10) return { n: mbps.toFixed(1), u: "Mb/s" };
+  return { n: Math.round(mbps), u: "Mb/s" };
+}
+
 function NetBody({ t }) {
+  const down = fmtRate(t ? t.down : null);
+  const up = fmtRate(t ? t.up : null);
   return (
     <div className="nx-net">
       <div>
         <p className="nx-readout nx-readout-sm">
-          {t ? Math.round(t.down) : "——"}<i>Mb/s</i>
+          {down.n}<i>{down.u}</i>
         </p>
         <p className="nx-sub nx-dim">down</p>
         <p className="nx-sub" style={{ marginTop: 8 }}>
-          {t ? `${Math.round(t.up)} Mb/s up` : "up unavailable"}
+          {t ? `${up.n} ${up.u} up` : "up unavailable"}
         </p>
       </div>
       <Spark series={t?.hist?.down} />
@@ -3769,12 +3780,12 @@ function NetOverview({ t }) {
         </div>
         <div className="nx-nc">
           <p className="nx-nc-label">Down</p>
-          <p className="nx-nc-val">{t ? Math.round(t.down) : "——"}<i> Mb/s</i></p>
+          <p className="nx-nc-val">{fmtRate(t ? t.down : null).n}<i> {fmtRate(t ? t.down : null).u}</i></p>
           <div className="nx-nc-spark"><Spark series={t?.hist?.down} /></div>
         </div>
         <div className="nx-nc">
           <p className="nx-nc-label">Up</p>
-          <p className="nx-nc-val">{t ? Math.round(t.up) : "——"}<i> Mb/s</i></p>
+          <p className="nx-nc-val">{fmtRate(t ? t.up : null).n}<i> {fmtRate(t ? t.up : null).u}</i></p>
           <div className="nx-nc-spark"><Spark series={t?.hist?.up} /></div>
         </div>
       </div>
