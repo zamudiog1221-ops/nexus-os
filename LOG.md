@@ -157,6 +157,20 @@ Other queued: drop Voice Notes into the Files module (artifact bus is the seam);
 
 Not yet pushed to GitHub as of this entry - several commits (keep-alive, dashboard revert chain, calendar tools) are local. Push before next session.
 
+2026-08-13 — Bento attempt + orbit final, assistant module wiring (work session)
+
+Did:
+
+Dashboard, final answer: tried the full bento reflow grid (grid-auto-flow dense, drag-to-reorder, resize). It still had gaps - a flow grid can't reproduce the hand-built orbit. Reverted to the fixed orbit for good and wrote it into DECISIONS.md as settled (do not revisit). Then upgraded the orbit rearrange from swap to REFLOW: dragging a widget moves it to the nearest same-size widget's position and the ones between shift over to fill (insert, not swap) - so the dragged widget keeps its size and nothing leaves a hole. Reflow happens within a size tier (small among small, wide among wide); the core stays centered. layout-v7.
+Assistant module wiring (#3): added network diagnostics tools - ping, dns_lookup, traceroute (all backed by existing Rust commands) - and read_file (reads/summarizes a file from the indexed folder via the index body field). Updated the system prompt to mention them.
+
+Learned / noted:
+
+The orbit vs grid tension is now permanently resolved and documented. Reflow-within-tier is the best rearrange we can offer without breaking the look.
+Assistant compatibility now covers: reminders/calendar, fitness, settings, quick launch, terminal, agent, navigation, network info + ping/dns/traceroute, files list + read. Still not wired: Automation (create/toggle rules - needs the rules store), Voice Notes creation (state lives in the SchoolNotes component, not ctx), Projects write. These are more involved; left for later.
+
+Next: test the reflow + new assistant tools; then Automation/Voice-Notes tools if wanted, or back to the Ubuntu VM (still stuck at EFI boot) / Linux port.
+
 Template
 ## YYYY-MM-DD — Short title (~Nh)
 
