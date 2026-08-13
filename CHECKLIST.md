@@ -74,7 +74,7 @@ NexusOS runs as a bootable Linux drive — one graded module taken to real, meas
 - [ ] Point the assistant at the local Ollama model
 
 ## Lightbulbs / polish (later)
-- [ ] Fix wrong widget values: Connection "0 ms round trip" (should be real latency to gateway) and System health "0°C" temperature (sensor reading 0 — not being read on this machine)
+- [x] Fix wrong widget values: round trip now measures real latency (pings the gateway every 6s); temp is hidden when the OS exposes no sensor instead of showing a fake 0. NOTE: reading real CPU temp on Windows needs a hardware-monitor dependency (LibreHardwareMonitor/WMI, often admin) — deferred; hiding is the honest display for now.
 - [ ] Jarvis-style launch animation: opens small and spreads outward on app start (Gio to send a reference)
 
 ## Open — next session (priority order)
