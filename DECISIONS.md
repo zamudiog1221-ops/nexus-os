@@ -2,6 +2,9 @@
 
 Why things are the way they are. Newest first. Each entry: the call, the reason, and what it rules out.
 
+## 2026-08-13 — Dashboard is the fixed orbit, permanently (no grid/bento)
+The dashboard uses the fixed orbit layout (named grid-areas: a-l + core), full stop. We tried three times to replace it with a resizable/reflowing tile grid so widgets could keep their size and move freely; every grid attempt left ugly gaps, because the widgets don't tile perfectly and a flow grid can't reproduce the hand-built symmetric orbit. The orbit's look (one solid rectangle, core centered, no gaps) is only achievable with fixed placement, which is fundamentally incompatible with "move any widget any size anywhere and reflow." We choose the look. Rearrange = pointer-drag a widget's bar, drop anywhere, it swaps with the nearest SAME-SIZE widget (sizes never change; the core, having no same-size peer, stays put). This is settled — do not revisit the grid/bento idea. Layout key: layout-v7.
+
 ## 2026-08-11 — Ollama only for the local model, no Hermes
 Local inference goes through Ollama and nothing else. Hermes is dropped from the stack — it added a second moving part and a 64k-context requirement without earning its place. Rules out the Hermes desktop app and its agent layer; the local model is Ollama, called directly.
 
