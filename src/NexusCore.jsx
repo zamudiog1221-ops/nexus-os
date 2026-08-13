@@ -1340,19 +1340,30 @@ function OrbitDashboard({ ctx, layout, setLayout, edit }) {
     return a == null ? "extra" : (AREA_GROUP[a] || "sm");
   };
 
-  // Swap two widgets' slots, but only if they're the same size (so neither one
-  // changes shape). Different-size slots simply don't accept the drop.
-  const swap = (aId, bId) => {
-    if (!aId || !bId || aId === bId) return;
-    if (groupOfId(aId) !== groupOfId(bId)) return;
-    setLayout((p) => {
-      const a = p.find((x) => x.id === aId), b = p.find((x) => x.id === bId);
-      if (!a || !b) return p;
-      const aArea = a.area === undefined ? (slotOf.get(a.id) ?? null) : a.area;
-      const bArea = b.area === undefined ? (slotOf.get(b.id) ?? null) : b.area;
-      return p.map((x) =>
-        x.id === aId ? { ...x, area: bArea } : x.id === bId ? { ...x, area: aArea } : x);
-    });
+  // The ordered slots within each size group. Reordering happens inside a group
+  // so every widget keeps its size and no slot is ever left empty.
+  const GROUP_SLOTS = { wide: ["a", "b"], bar: ["k", "l"], core: ["core"],
+    sm: ["c", "d", "e", "f", "g", "h", "i", "j"] };
+
+  // Move the dragged widget to the target's position; the widgets between them
+  // shift over to fill the gap (an insert, not a swap). Same-size group only, so
+  // nothing resizes and the orbit stays completely full - no holes.
+  const reflowMove = (dragId, targetId) => {
+    if (!dragId || !targetId || dragId === targetId) return;
+    const g = groupOfId(dragId);
+    if (g !== groupOfId(targetId)) return;
+    const slots = GROUP_SLOTS[g] || [];
+    const order = layout
+      .filter((it) => slots.includes(areaOf(it)))
+      .sort((a, b) => slots.indexOf(areaOf(a)) - slots.indexOf(areaOf(b)))
+      .map((it) => it.id);
+    const from = order.indexOf(dragId), to = order.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    order.splice(from, 1);
+    order.splice(to, 0, dragId);
+    const areaFor = {};
+    order.forEach((id, i) => { areaFor[id] = slots[i]; });
+    setLayout((p) => p.map((it) => areaFor[it.id] !== undefined ? { ...it, area: areaFor[it.id] } : it));
   };
   const removeWidget = (id) => setLayout((p) => p.filter((x) => x.id !== id));
 
@@ -1383,7 +1394,7 @@ function OrbitDashboard({ ctx, layout, setLayout, edit }) {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       const target = nearestSwappable(ev.clientX, ev.clientY, dragIdRef.current);
-      if (target) swap(dragIdRef.current, target);
+      if (target) reflowMove(dragIdRef.current, target);
       dragIdRef.current = null;
       setDragId(null);
       setOverId(null);
