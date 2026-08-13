@@ -10948,6 +10948,17 @@ export default function NexusCore() {
           <div className="nx-topbar-tools">
             {active === "dashboard" && edit && (
               <button className="nx-btn"
+                onClick={() => {
+                  const json = JSON.stringify(layout);
+                  navigator.clipboard?.writeText(json).then(() => toast("Layout copied to clipboard"))
+                    .catch(() => toast("Couldn't copy — check console"));
+                  console.log("CURRENT DASHBOARD LAYOUT:\n" + json);
+                }}>
+                Copy layout
+              </button>
+            )}
+            {active === "dashboard" && edit && (
+              <button className="nx-btn"
                 onClick={() => { if (confirm("Reset the dashboard to its default layout?")) setLayout(DEFAULT_LAYOUT); }}>
                 Reset layout
               </button>
