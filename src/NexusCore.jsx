@@ -1337,49 +1337,6 @@ class WidgetBoundary extends React.Component {
   }
 }
 
-const WidgetCell = React.memo(
-  function WidgetCell({ w, item, index, edit, ctx, dragging, over, on }) {
-    return (
-      <article
-        className={`nx-w nx-w-${item.size}${dragging ? " nx-w-drag" : ""}${over ? " nx-w-over" : ""}`}
-        draggable={edit}
-        onDragStart={() => on.start(index)}
-        onDragEnd={on.end}
-        onDragOver={(e) => { e.preventDefault(); on.over(index); }}
-        onDrop={(e) => { e.preventDefault(); on.drop(index); }}>
-        {edit && (
-          <div className="nx-w-tools">
-            <span className="nx-w-grip" tabIndex={0} aria-label={`Move ${w.title}`}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowLeft") { e.preventDefault(); on.nudge(index, -1); }
-                if (e.key === "ArrowRight") { e.preventDefault(); on.nudge(index, 1); }
-              }}>
-              <GripVertical size={13} />
-            </span>
-            <button onClick={() => on.resize(index)} title="Change size">
-              <Maximize2 size={11} />{SIZE_LABEL[item.size]}
-            </button>
-            <button onClick={() => on.remove(index)} title={`Remove ${w.title}`}>
-              <X size={12} />
-            </button>
-          </div>
-        )}
-        <WidgetBoundary title={w.title}>
-          <Frame w={w}>{w.render(ctx)}</Frame>
-        </WidgetBoundary>
-      </article>
-    );
-  },
-  (a, b) => {
-    if (a.item !== b.item || a.edit !== b.edit || a.index !== b.index) return false;
-    if (a.dragging !== b.dragging || a.over !== b.over) return false;
-    if (a.ctx.active !== b.ctx.active) return false;
-    // Static widgets ignore telemetry churn completely.
-    if (!LIVE_WIDGETS.has(a.w.id)) return true;
-    return a.ctx.t === b.ctx.t && a.ctx.online === b.ctx.online;
-  }
-);
-
 /* Fixed positions for the centered "orbit" dashboard. The core sits
    dead-center; everything else is placed around it by grid area. This
    is the default view. Rearrange mode switches to the free drag grid. */
@@ -3655,24 +3612,10 @@ const tauriInvoke = (cmd, args) =>
   (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke)(cmd, args);
 
 const MockNet = {
-  label: IS_DESKTOP ? "Live · DNS and ping are real" : "Mock adapter",
+  label: IS_DESKTOP ? "Live · real probes" : "Mock adapter",
   detail: IS_DESKTOP
-    ? "DNS lookups and ping hit the network for real. Device discovery, traceroute, and the router details below are still simulated — they need raw sockets we haven't added."
-    : "Simulated results. The Tauri adapter will read real interfaces and send real probes.",
-
-  overview() {
-    return {
-      publicIp: "73.118.204.62",
-      localIp: "192.168.1.14",
-      gateway: "192.168.1.1",
-      subnet: "255.255.255.0",
-      dns: ["1.1.1.1", "8.8.8.8"],
-      iface: "Wi-Fi (Intel AX211)",
-      mac: "F0:18:98:4C:22:71",
-      wifi: { ssid: "ASCTE-NET", band: "5 GHz", channel: 44, signal: -47, security: "WPA2-Enterprise", rate: "866 Mb/s" },
-      router: { model: "Netgear R7000", firmware: "1.0.11.136", uptime: "14d 6h" },
-    };
-  },
+    ? "Ping, DNS, device discovery (ARP) and traceroute all hit the network for real."
+    : "Simulated results in the browser — the desktop app runs real probes.",
 
   async scan(onDevice, alive) {
     for (const d of DEVICE_SEED) {
