@@ -72,3 +72,12 @@ NexusOS runs as a bootable Linux drive — one graded module taken to real, meas
 - [ ] Agent run: install Ollama
 - [ ] Agent run: pull a local model
 - [ ] Point the assistant at the local Ollama model
+
+## Open — next session (priority order)
+- [ ] FIX Ubuntu VM boot (PC 2): EFI lost the ubuntu entry ("No bootable device", only PXE shows). Use EFI Shell: FS0: / cd EFI\ubuntu / shimx64.efi. Then permanent: copy shimx64.efi to /boot/efi/EFI/BOOT/BOOTX64.EFI. If no shell, boot ISO → Try Ubuntu → boot-repair.
+- [ ] Then Guest Additions for fullscreen (sed out cdrom source first, then virtualbox-guest-utils + -x11, reboot)
+- [ ] DECIDE dashboard: build the bento reflow engine (move any widget anywhere, reflow around it, incl. different sizes + move the core) OR keep the fixed orbit with same-size swaps. Current = orbit, same-size swap only.
+- [ ] Wire more modules to the assistant: Networking actions, Voice Notes, Automation, Files-open, Projects (pattern: add to ASSISTANT_TOOLS + handler)
+- [ ] Drop Voice Notes transcripts/summaries into the Files module (use eventBus artifact bus)
+- [ ] Dead-code cleanup: remove unused WidgetCell + orbit-era grid CSS
+- [ ] Push all local commits to GitHub

@@ -137,6 +137,26 @@ Known small gaps (not urgent): deleting a note leaves an orphan recording file; 
 
 Next: pick one - the "resume every tab where I left off" idea, drop notes into Files, or back to the Linux port on PC 2.
 
+2026-08-12 (cont.) — Tab resume, dashboard saga, assistant calendar tools (evening)
+
+Did:
+
+Keep-alive tabs: every module now stays mounted when you switch away, so its state (drafts, sub-tabs, scroll, search) resumes on return; resets on restart. Inactive tabs reuse a cached element so they don't re-render on telemetry ticks.
+Dashboard reminders now only show items due today/tomorrow (or overdue) via dueNear(); the rest live in Calendar, with a "+N more" note.
+Big dashboard back-and-forth (documented so we don't repeat it): the old "Rearrange" swapped between the orbit view and a different grid, jarring + didn't save. Tried: (1) edit orbit in place with native drag - drag didn't fire in the webview; (2) pointer-based drag - worked; (3) switched to a tile grid so widgets keep their own size - but the flow grid left ugly gaps around the big core and mangled the saved layout. REVERTED to the fixed orbit (layout-v5, clean symmetric look). Current orbit behavior: pointer-drag a widget's top bar, drop anywhere, it swaps with the NEAREST SAME-SIZE widget (sizes never change). Added Reset layout + Copy layout buttons in Rearrange.
+Assistant calendar tools: added update_reminder (reschedule/rename/complete), fixed navigate to include calendar + agent, updated the system prompt. Did an AI<->module compatibility audit (see below).
+
+Open / still to do (next session):
+
+DASHBOARD - the "move any widget anywhere and everything reflows around it, even different sizes" feature is NOT built. That needs a real bento layout engine (explicit placement + reflow), a dedicated multi-hour build. Current orbit only does same-size swaps; the core can't be moved (nothing its size). Gio wants the full reflow - decide whether to build the bento engine or keep the orbit as-is.
+UBUNTU VM (PC 2) - STUCK. After installing build tools + guest additions and rebooting, the VM won't boot: "No bootable option or device found" - EFI lost the ubuntu boot entry (known VirtualBox + Ubuntu 24.04 bug). Boot Manager only shows PXEv4/PXEv6 (network boot), no ubuntu/disk entry. Next step: find the EFI Internal Shell in the boot menu and run FS0: / cd EFI\ubuntu / shimx64.efi (or grubx64.efi) to boot; then make permanent with: sudo mkdir -p /boot/efi/EFI/BOOT && sudo cp /boot/efi/EFI/ubuntu/shimx64.efi /boot/efi/EFI/BOOT/BOOTX64.EFI. If no EFI shell exists, boot the Ubuntu ISO -> Try Ubuntu -> run boot-repair. Guest Additions install for fullscreen still pending after boot is fixed (apt was choking on the leftover cdrom source; fix: sudo sed -i '/cdrom:/d' /etc/apt/sources.list then apt update, then install virtualbox-guest-utils virtualbox-guest-x11).
+
+AI <-> module compatibility - still-missing tools (not wired to the assistant): School/Voice Notes (record/summarize by command), Networking actions (ping/DNS/traceroute/scan), Cybersecurity (hash/scan), Automation (create/toggle rules), Files (open/summarize a file), Projects (add tasks/notes). Pattern for future modules: add a tool to ASSISTANT_TOOLS + a handler. Fold into the workflow each time we build a module.
+
+Other queued: drop Voice Notes into the Files module (artifact bus is the seam); dead-code cleanup (old WidgetCell + orbit-era grid CSS unused); "if too big, swap with a couple" is part of the bento-engine decision.
+
+Not yet pushed to GitHub as of this entry - several commits (keep-alive, dashboard revert chain, calendar tools) are local. Push before next session.
+
 Template
 ## YYYY-MM-DD — Short title (~Nh)
 
