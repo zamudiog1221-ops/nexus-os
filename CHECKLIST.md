@@ -82,6 +82,6 @@ NexusOS runs as a bootable Linux drive — one graded module taken to real, meas
 - [ ] Then Guest Additions for fullscreen (sed out cdrom source first, then virtualbox-guest-utils + -x11, reboot)
 - [ ] DECIDE dashboard: build the bento reflow engine (move any widget anywhere, reflow around it, incl. different sizes + move the core) OR keep the fixed orbit with same-size swaps. Current = orbit, same-size swap only.
 - [ ] Wire more modules to the assistant: Networking actions, Voice Notes, Automation, Files-open, Projects (pattern: add to ASSISTANT_TOOLS + handler)
-- [ ] Drop Voice Notes transcripts/summaries into the Files module (use eventBus artifact bus)
+- [x] Drop Voice Notes transcripts/summaries into the Files module — done by reading the shared voice-notes store (simpler + always in sync than the event bus); shows with a "Voice Notes" source badge, searchable + summarizable
 - [ ] Dead-code cleanup: remove unused WidgetCell + orbit-era grid CSS
 - [ ] Push all local commits to GitHub
