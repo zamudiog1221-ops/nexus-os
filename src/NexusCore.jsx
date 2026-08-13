@@ -9963,6 +9963,9 @@ function VoiceOverlay({ ctx, settings }) {
   const convoRef = useRef([]);       // conversation history across turns
   const lastTurnRef = useRef(0);     // timestamp of last exchange
   const voiceAbortRef = useRef(null); // abort in-flight generation
+  const autoListeningRef = useRef(false); // hands-free listening after a question
+  const silenceRef = useRef(null);        // silence timer for auto-listen
+  const autoListenRef = useRef(null);     // holds the autoListen fn for process() to call
 
   const key = settings.voiceKey || "t";
   const speakBack = settings.voiceSpeak !== false;
@@ -10028,12 +10031,22 @@ function VoiceOverlay({ ctx, settings }) {
         }
         convoRef.current.push({ role: "user", content: results });
       }
-      setReply(finalText || "Done.");
+      const spoken = finalText || "Done.";
+      setReply(spoken);
       setPhase("reply");
-      // "reply"  -  this is the answer to something the user just asked, so it
-      // jumps any queued background notices rather than waiting behind them.
-      speak(finalText || "Done.", speakBack, settings.voiceGender, "reply");
-      setTimeout(() => setPhase((p) => (p === "reply" ? "idle" : p)), 5000);
+      // "reply"  -  the answer to something the user just asked, so it jumps any
+      // queued background notices. Await it so the bubble stays up until the
+      // voice actually finishes speaking (not a fixed timer).
+      await speak(spoken, speakBack, settings.voiceGender, "reply");
+      if (ac.signal.aborted) return;
+      // If the assistant asked the user something back, listen hands-free for
+      // the answer instead of making them hold the key again.
+      const isQuestion = /\?\s*$/.test(spoken.trim());
+      if (isQuestion && SPEECH && !schoolRef.current) {
+        autoListenRef.current?.();
+      } else {
+        setTimeout(() => setPhase((p) => (p === "reply" ? "idle" : p)), 3000);
+      }
     } catch (e) {
       if (e?.name === "AbortError") { setPhase("idle"); return; } // user stopped it
       const msg = String(e?.message || e);
@@ -10045,6 +10058,9 @@ function VoiceOverlay({ ctx, settings }) {
   // Stop the assistant mid-thought or mid-speech.
   const stopVoice = () => {
     voiceAbortRef.current?.abort();
+    autoListeningRef.current = false;
+    clearTimeout(silenceRef.current);
+    try { recogRef.current?.stop(); } catch { /* no-op */ }
     try { window.speechSynthesis?.cancel(); } catch { /* no-op */ }
     try { elevenAudio?.pause(); if (elevenAudio) elevenAudio.currentTime = 0; } catch { /* no-op */ }
     setPhase("idle");
@@ -10065,6 +10081,54 @@ function VoiceOverlay({ ctx, settings }) {
   const schoolRef = useRef(settings.schoolMode);
   schoolRef.current = settings.schoolMode;
 
+  // Cancel a hands-free auto-listen (called when the user grabs the key, stops,
+  // or a new turn starts).
+  const cancelAuto = () => {
+    autoListeningRef.current = false;
+    clearTimeout(silenceRef.current);
+    try { recogRef.current?.stop(); } catch { /* no-op */ }
+  };
+
+  // Hands-free listen: after the assistant asks a question, open the mic and
+  // send automatically once the user stops talking (silence timer), so they
+  // don't have to hold the key to answer. Reassigned each render; only ever
+  // called on demand.
+  autoListenRef.current = () => {
+    if (!SPEECH || heldRef.current || autoListeningRef.current) return;
+    finalRef.current = ""; interimRef.current = "";
+    setHeard(""); setPhase("listening");
+    autoListeningRef.current = true;
+    let gotSpeech = false;
+    const rec = new SPEECH();
+    rec.continuous = true; rec.interimResults = true; rec.lang = "en-US"; rec.maxAlternatives = 1;
+    const finish = () => {
+      if (!autoListeningRef.current) return;
+      autoListeningRef.current = false;
+      clearTimeout(silenceRef.current);
+      try { rec.stop(); } catch { /* no-op */ }
+      const said = (finalRef.current + " " + (interimRef.current || "")).trim();
+      interimRef.current = "";
+      if (said) processRef.current(said); else setPhase("idle");
+    };
+    rec.onresult = (e) => {
+      let interim = "", fin = finalRef.current;
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const tr = e.results[i][0].transcript;
+        if (e.results[i].isFinal) fin += tr + " "; else interim += tr;
+      }
+      finalRef.current = fin; interimRef.current = interim;
+      setHeard((fin + interim).trim());
+      gotSpeech = true;
+      clearTimeout(silenceRef.current);
+      silenceRef.current = setTimeout(finish, 1600); // ~1.6s of quiet ends the answer
+    };
+    rec.onend = () => { if (autoListeningRef.current) { try { rec.start(); } catch { /* race */ } } };
+    rec.onerror = (ev) => { if (ev && ev.error === "not-allowed") { autoListeningRef.current = false; setPhase("idle"); } };
+    try { rec.start(); recogRef.current = rec; } catch { /* already running */ }
+    // If they never say anything, give up after 8s so the mic doesn't hang open.
+    setTimeout(() => { if (autoListeningRef.current && !gotSpeech) finish(); }, 8000);
+  };
+
   // HOLD to talk: press and hold the key to listen, release to send. No
   // silence timer, so it never cuts you off while you're still speaking or
   // pausing mid-sentence. The engine's own onend is restarted while held so a
@@ -10074,6 +10138,7 @@ function VoiceOverlay({ ctx, settings }) {
 
     const startListen = () => {
       if (heldRef.current) return;
+      cancelAuto();            // if we were hands-free listening, the key takes over
       heldRef.current = true;
       finalRef.current = "";
       setHeard(""); setReply(""); setPhase("listening");
@@ -10165,7 +10230,7 @@ function VoiceOverlay({ ctx, settings }) {
         <div className="nx-voice-body">
           {phase === "listening" && <>
             <p className="nx-voice-label">Listening…</p>
-            <p className="nx-voice-text">{heard || "Go ahead — release the key when you're done."}</p>
+            <p className="nx-voice-text">{heard || "Go ahead, I'm listening…"}</p>
           </>}
           {phase === "thinking" && <>
             <p className="nx-voice-label">Working…</p>
