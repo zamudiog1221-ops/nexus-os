@@ -10915,6 +10915,12 @@ export default function NexusCore() {
             <h2>{active === "dashboard" ? "Dashboard" : mod.label}</h2>
           </div>
           <div className="nx-topbar-tools">
+            {active === "dashboard" && edit && (
+              <button className="nx-btn"
+                onClick={() => { if (confirm("Reset the dashboard to its default layout?")) setLayout(DEFAULT_LAYOUT); }}>
+                Reset layout
+              </button>
+            )}
             {active === "dashboard" && (
               <button className={`nx-btn${edit ? " nx-btn-on" : ""}`}
                 onClick={() => setEdit((e) => !e)}>{edit ? "Done" : "Rearrange"}</button>
