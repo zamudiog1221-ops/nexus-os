@@ -1325,9 +1325,22 @@ function OrbitDashboard({ ctx, layout, setLayout, edit }) {
   const framed = visible.filter((it) => areaSet.has(areaOf(it)));
   const extras = visible.filter((it) => !areaSet.has(areaOf(it)));
 
-  // Swap two widgets' slots. Handles orbit<->orbit, orbit<->extras, and the core.
+  // Every orbit slot has a fixed size, so a widget only keeps its size if it
+  // swaps into a slot of the SAME size. Group the slots by shape; swaps (and the
+  // drop highlight) are allowed only within a group, so nothing ever resizes.
+  const AREA_GROUP = { a: "wide", b: "wide", k: "bar", l: "bar", core: "core",
+    c: "sm", d: "sm", e: "sm", f: "sm", g: "sm", h: "sm", i: "sm", j: "sm" };
+  const groupOfId = (id) => {
+    const it = layout.find((x) => x.id === id);
+    const a = it ? areaOf(it) : null;
+    return a == null ? "extra" : (AREA_GROUP[a] || "sm");
+  };
+
+  // Swap two widgets' slots, but only if they're the same size (so neither one
+  // changes shape). Different-size slots simply don't accept the drop.
   const swap = (aId, bId) => {
     if (!aId || !bId || aId === bId) return;
+    if (groupOfId(aId) !== groupOfId(bId)) return;
     setLayout((p) => {
       const a = p.find((x) => x.id === aId), b = p.find((x) => x.id === bId);
       if (!a || !b) return p;
@@ -1350,7 +1363,11 @@ function OrbitDashboard({ ctx, layout, setLayout, edit }) {
     e.preventDefault();
     dragIdRef.current = id;
     setDragId(id);
-    const move = (ev) => setOverId(cellUnder(ev.clientX, ev.clientY));
+    const move = (ev) => {
+      const t = cellUnder(ev.clientX, ev.clientY);
+      // Only highlight a target you can actually swap with (same size).
+      setOverId(t && groupOfId(t) === groupOfId(dragIdRef.current) ? t : null);
+    };
     const up = (ev) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
