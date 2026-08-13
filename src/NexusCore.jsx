@@ -1285,7 +1285,10 @@ function OrbitDashboard({ ctx, layout, setLayout, edit }) {
   const schoolMode = ctx.settings?.schoolMode;
   const aiWidget = (id) => id === "quickchat";
 
-  const [drag, setDrag] = useState(null); // id being dragged
+  // Pointer-based drag (native HTML5 DnD is unreliable inside the webview).
+  const dragIdRef = useRef(null);
+  const [dragId, setDragId] = useState(null);
+  const [overId, setOverId] = useState(null);
 
   const visible = layout.filter((it) => WIDGET_MAP.get(it.id) && !(schoolMode && aiWidget(it.id)));
   const framed = visible.filter((it) => areaSet.has(areaOf(it)));
@@ -1305,22 +1308,42 @@ function OrbitDashboard({ ctx, layout, setLayout, edit }) {
   };
   const removeWidget = (id) => setLayout((p) => p.filter((x) => x.id !== id));
 
+  const cellUnder = (x, y) => {
+    const el = document.elementFromPoint(x, y);
+    const cell = el && el.closest && el.closest("[data-wid]");
+    return cell ? cell.getAttribute("data-wid") : null;
+  };
+
+  const startDrag = (e, id) => {
+    if (!edit) return;
+    e.preventDefault();
+    dragIdRef.current = id;
+    setDragId(id);
+    const move = (ev) => setOverId(cellUnder(ev.clientX, ev.clientY));
+    const up = (ev) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const target = cellUnder(ev.clientX, ev.clientY);
+      if (target) swap(dragIdRef.current, target);
+      dragIdRef.current = null;
+      setDragId(null);
+      setOverId(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const cell = (item, framedCell) => {
     const w = WIDGET_MAP.get(item.id);
     const area = areaOf(item);
     const isCore = area === "core";
     return (
-      <div key={item.id}
-        className={`nx-orbit-cell${framedCell ? "" : " nx-orbit-cell-extra"}${drag === item.id ? " nx-cell-drag" : ""}`}
-        style={framedCell ? { gridArea: area } : undefined}
-        draggable={edit}
-        onDragStart={edit ? () => setDrag(item.id) : undefined}
-        onDragEnd={edit ? () => setDrag(null) : undefined}
-        onDragOver={edit ? (e) => e.preventDefault() : undefined}
-        onDrop={edit ? (e) => { e.preventDefault(); swap(drag, item.id); setDrag(null); } : undefined}>
+      <div key={item.id} data-wid={item.id}
+        className={`nx-orbit-cell${framedCell ? "" : " nx-orbit-cell-extra"}${dragId === item.id ? " nx-cell-drag" : ""}${overId === item.id && dragId && dragId !== item.id ? " nx-cell-over" : ""}`}
+        style={framedCell ? { gridArea: area } : undefined}>
         <article className={`nx-w${isCore ? " nx-w-core" : ""}${edit ? " nx-w-editing" : ""}`}>
           {edit && (
-            <div className="nx-w-edit-bar">
+            <div className="nx-w-edit-bar" onPointerDown={(e) => { if (!e.target.closest(".nx-w-x")) startDrag(e, item.id); }}>
               <span className="nx-w-grip"><GripVertical size={12} /> drag to swap</span>
               <button className="nx-w-x" title="Remove widget" onClick={() => removeWidget(item.id)}><X size={12} /></button>
             </div>
@@ -11126,11 +11149,12 @@ body{height:100vh;overflow:hidden;}
 .nx-w:hover{border-color:rgba(159,190,255,0.19);}
 .nx-grid-edit .nx-w{cursor:grab;border-style:dashed;border-color:rgba(159,190,255,0.2);}
 /* In-place orbit editing: dashed cells, a small edit bar, drag-to-swap. */
-.nx-orbit-edit .nx-orbit-cell,.nx-orbit-extras .nx-orbit-cell-extra{cursor:grab;}
 .nx-w-editing{border-style:dashed;border-color:rgba(159,190,255,0.28);}
-.nx-cell-drag{opacity:0.45;}
+.nx-cell-drag{opacity:0.4;}
+.nx-cell-over .nx-w-editing{border-color:var(--signal);box-shadow:0 0 0 2px var(--glow-soft);}
 .nx-w-edit-bar{display:flex;align-items:center;justify-content:space-between;
-  margin:-4px -4px 8px;padding:2px 4px;}
+  margin:-4px -4px 8px;padding:2px 4px;cursor:grab;touch-action:none;}
+.nx-w-edit-bar:active{cursor:grabbing;}
 .nx-w-grip{display:flex;align-items:center;gap:5px;font-size:10px;letter-spacing:0.04em;
   text-transform:uppercase;color:var(--muted-2);}
 .nx-w-x{display:flex;align-items:center;justify-content:center;width:22px;height:22px;
