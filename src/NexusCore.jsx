@@ -5341,6 +5341,8 @@ function FilesView({ ctx }) {
   const [summaries, setSummaries] = useState({});
   const [indexing, setIndexing] = useState(false);
   const [folder, setFolder] = usePersistent("files-folder", "");
+  const [voiceNotes] = usePersistent("voice-notes", []); // fold Voice Notes in as artifacts
+  const [reindex, setReindex] = useState(false); // show the folder-index screen on demand
   const [pathInput, setPathInput] = useState("");
   const [idxErr, setIdxErr] = useState(null);
   const abortRef = useRef(null);
@@ -5359,6 +5361,7 @@ function FilesView({ ctx }) {
       const withMeta = found.map((f, i) => ({ ...f, order: i, fav: false, seed: false }));
       setFiles(withMeta);
       setFolder(target);
+      setReindex(false);
       setSel(withMeta[0]?.id || null);
     } catch (e) {
       setIdxErr(String(e?.message || e));
@@ -5375,9 +5378,25 @@ function FilesView({ ctx }) {
 
   const parsed = useMemo(() => parseQuery(q), [q]);
 
+  // Voice Notes shown as artifacts alongside indexed files, with a source badge.
+  const noteItems = useMemo(() => voiceNotes.map((n, i) => ({
+    id: "vn-" + n.id,
+    name: (n.title || "Voice note") + ".txt",
+    path: "Voice Notes" + (n.topic ? " / " + n.topic : ""),
+    type: "txt",
+    size: `${n.words || 0}w`,
+    when: n.day || "note",
+    tags: n.topic ? [n.topic] : [],
+    body: (n.summary ? "SUMMARY\n" + n.summary + "\n\n" : "") + "TRANSCRIPT\n" + (n.text || ""),
+    order: -1000 - i, // keep them at the top under "recent"
+    fav: false, seed: false, source: "Voice Notes",
+  })), [voiceNotes]);
+
+  const items = useMemo(() => [...noteItems, ...files], [noteItems, files]);
+
   const hits = useMemo(() => {
     const out = [];
-    for (const f of files) {
+    for (const f of items) {
       if (onlyFav && !f.fav) continue;
       const where = matchFile(f, parsed);
       if (where) out.push({ ...f, where });
@@ -5387,20 +5406,20 @@ function FilesView({ ctx }) {
       : sort === "size" ? sizeBytes(b.size) - sizeBytes(a.size)
       : a.order - b.order);
     return out;
-  }, [files, parsed, sort, onlyFav]);
+  }, [items, parsed, sort, onlyFav]);
 
-  const file = files.find((f) => f.id === sel) || null;
+  const file = items.find((f) => f.id === sel) || null;
 
   useEffect(() => {
     if (!file && hits.length) setSel(hits[0].id);
-    if (!files.length) setSel(null);
-  }, [files, file, hits]);
+    if (!items.length) setSel(null);
+  }, [items, file, hits]);
 
   const tagCounts = useMemo(() => {
     const m = new Map();
-    for (const f of files) for (const t of f.tags) m.set(t, (m.get(t) || 0) + 1);
+    for (const f of items) for (const t of f.tags) m.set(t, (m.get(t) || 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
-  }, [files]);
+  }, [items]);
 
   const patch = (id, fn) => setFiles((prev) => prev.map((f) => (f.id === id ? fn(f) : f)));
 
@@ -5426,12 +5445,12 @@ function FilesView({ ctx }) {
     }
   };
 
-  if (!files.length) {
+  if (reindex || !items.length) {
     return (
       <div className="nx-mod">
         <div className="nx-first">
           <span className="nx-first-mark"><Folder size={22} /></span>
-          <h2>No folder indexed.</h2>
+          <h2>{reindex ? "Index a folder" : "No folder indexed."}</h2>
           <p>
             Point Nexus at a folder and it will index what's inside — searchable by
             name, path, and by what text files actually say. Read-only; nothing is changed.
@@ -5447,8 +5466,12 @@ function FilesView({ ctx }) {
             </button>
           </div>
           {idxErr && <p className="nx-out-err" style={{ marginTop: 10 }}>{idxErr}</p>}
+          {reindex && items.length > 0 && (
+            <button className="nx-chip" style={{ marginTop: 12 }} onClick={() => setReindex(false)}>Cancel</button>
+          )}
           <p className="nx-first-alt">
             Tip: in File Explorer, click the address bar to see the full path, then copy it.
+            Your Voice Notes always show here too.
           </p>
         </div>
       </div>
@@ -5479,10 +5502,10 @@ function FilesView({ ctx }) {
             <Tag size={10} />{t}<b className="nx-tag-n">{n}</b>
           </button>
         ))}
-        <span className="nx-fcount">{hits.length} of {files.length}</span>
-        <button className="nx-chip" onClick={() => { setFiles([]); setPathInput(folder); }}
+        <span className="nx-fcount">{hits.length} of {items.length}</span>
+        <button className="nx-chip" onClick={() => { setPathInput(folder); setReindex(true); }}
           title="Index a different folder">
-          <Folder size={11} />Change folder
+          <Folder size={11} />{folder ? "Change folder" : "Index a folder"}
         </button>
       </div>
 
@@ -5511,6 +5534,7 @@ function FilesView({ ctx }) {
                   <span className="nx-frow-path">{f.path}</span>
                 </span>
                 <span className="nx-frow-tags">
+                  {f.source && <i className="nx-frow-src"><Mic size={9} />{f.source}</i>}
                   {f.tags.slice(0, 2).map((t) => <i key={t}>{t}</i>)}
                 </span>
                 {f.where === "content" && <span className="nx-frow-hit">in contents</span>}
@@ -12202,6 +12226,8 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   border-radius:10px;background:rgba(2,4,9,0.4);}
 .nx-rem-done{text-decoration:line-through;opacity:0.55;}
 .nx-note-audio{width:100%;height:34px;margin-top:6px;border-radius:8px;}
+.nx-frow-src{display:inline-flex;align-items:center;gap:3px;color:var(--signal)!important;
+  border-color:var(--edge);opacity:0.95;}
 .nx-task-more{list-style:none;font-size:11px;color:var(--muted-2);padding:4px 0 0 2px;opacity:0.8;}
 
 .nx-drop-zone{position:relative;border-radius:16px;transition:all .2s;}
