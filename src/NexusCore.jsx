@@ -82,6 +82,7 @@ function useTelemetry(demo, active) {
     typeof navigator !== "undefined" ? navigator.onLine : true
   );
   const hist = useRef({ down: [], cpu: [] });
+  const pingRef = useRef(null); // real round-trip latency to the gateway, ms
 
   // Are we inside the Tauri desktop shell? If so, real system data is available.
   const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
@@ -128,7 +129,9 @@ function useTelemetry(demo, active) {
           h.cpu = [...h.cpu, f.cpu].slice(-KEEP);
           setT({
             cpu: f.cpu, mem: f.mem, disk: f.disk,
-            down: f.down, up: f.up, ping: 0, temp: f.temp,
+            // ping is measured separately (below); temp is null when the OS
+            // won't expose a sensor, so the UI can hide it instead of showing 0.
+            down: f.down, up: f.up, ping: pingRef.current, temp: f.temp > 0 ? f.temp : null,
             totalMemGb: f.total_mem_gb, usedMemGb: f.used_mem_gb,
             hist: { down: h.down, cpu: h.cpu },
             ...dashExtras,
@@ -141,7 +144,19 @@ function useTelemetry(demo, active) {
       };
       tick();
       const iv = setInterval(tick, active === "dashboard" ? 1500 : 5000);
-      return () => { alive = false; clearInterval(iv); };
+
+      // Real latency: ping the gateway every few seconds and stash the ms.
+      let gw = null;
+      const probeLatency = async () => {
+        try {
+          const inv = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+          if (!gw) { const n = await inv("net_info"); gw = n?.gateway; }
+          if (gw) { const ms = await inv("ping_host", { host: gw }); if (alive) pingRef.current = ms; }
+        } catch { /* keep the last reading */ }
+      };
+      probeLatency();
+      const pv = setInterval(probeLatency, 6000);
+      return () => { alive = false; clearInterval(iv); clearInterval(pv); };
     }
 
     if (!demo) { hist.current = { down: [], cpu: [] }; setT(null); return; }
@@ -857,7 +872,7 @@ async function runAssistantTool(name, input, ctx) {
     if (name === "get_system_stats") {
       const t = ctx.t;
       if (!t) return "System telemetry isn't available right now.";
-      return `CPU ${Math.round(t.cpu)}%, memory ${Math.round(t.mem)}%, disk ${Math.round(t.disk)}%, temp ${Math.round(t.temp)}°C, network down ${Math.round(t.down)} Mb/s / up ${Math.round(t.up)} Mb/s.`;
+      return `CPU ${Math.round(t.cpu)}%, memory ${Math.round(t.mem)}%, disk ${Math.round(t.disk)}%${t.temp != null ? `, temp ${Math.round(t.temp)}°C` : " (temp sensor unavailable)"}, network down ${Math.round(t.down)} Mb/s / up ${Math.round(t.up)} Mb/s.`;
     }
     if (name === "get_reminders") {
       const r = ctx.reminders || [];
@@ -1200,7 +1215,9 @@ const WIDGETS = [
           <Radio size={11} />{online ? "Online" : "Offline"}
         </p>
         <p className="nx-sub nx-dim" style={{ marginTop: 12 }}>
-          {t ? `${Math.round(t.ping)} ms round trip` : "Latency unavailable"}
+          {!t ? "Latency unavailable"
+            : t.ping == null ? "Measuring latency…"
+            : `${Math.round(t.ping)} ms round trip`}
         </p>
       </>
     ) },
@@ -1225,7 +1242,7 @@ const WIDGETS = [
         <>
           <p className={`nx-readout ${tone}`}>{score}</p>
           <p className="nx-sub">{issues.length ? issues[0] : "Nothing needs attention"}</p>
-          <p className="nx-sub nx-dim">{Math.round(t.temp)}°C · {Math.round(t.cpu)}% cpu</p>
+          <p className="nx-sub nx-dim">{t.temp != null ? `${Math.round(t.temp)}°C · ` : ""}{Math.round(t.cpu)}% cpu</p>
         </>
       );
     } },
