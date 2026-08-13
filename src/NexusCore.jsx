@@ -634,7 +634,7 @@ const ASSISTANT_TOOLS = [
   },
   {
     name: "add_reminder",
-    description: "Add a reminder or task to the user's list. Use for anything they want to remember or be reminded of — tests, homework, errands, deadlines.",
+    description: "Add a reminder / calendar item to the user's list. Use for anything they want to remember or be reminded of — tests, homework, errands, deadlines. If a date is given it shows up on that day in the Calendar module.",
     input_schema: {
       type: "object",
       properties: {
@@ -642,6 +642,20 @@ const ASSISTANT_TOOLS = [
         due: { type: "string", description: "Optional human-readable due date/time, e.g. 'Thursday' or 'Oct 3 3pm'. Omit if none given." },
       },
       required: ["text"],
+    },
+  },
+  {
+    name: "update_reminder",
+    description: "Change an existing reminder / calendar item: reschedule it to a new date, rename it, or mark it done or not done. Match by its current text. Use get_reminders first if unsure which one they mean. This is how you move something on the calendar.",
+    input_schema: {
+      type: "object",
+      properties: {
+        match: { type: "string", description: "Text (or part) of the reminder to change, e.g. 'Math test'." },
+        text: { type: "string", description: "New text, if renaming it." },
+        due: { type: "string", description: "New date/day, e.g. 'Friday' or 'Oct 3'. Pass an empty string to remove the date (unschedule it)." },
+        done: { type: "boolean", description: "Set true to mark done, false to mark not done." },
+      },
+      required: ["match"],
     },
   },
   {
@@ -663,7 +677,7 @@ const ASSISTANT_TOOLS = [
     input_schema: {
       type: "object",
       properties: {
-        module: { type: "string", description: "Module id: dashboard, assistant, terminal, security, network, projects, school, encyclopedia, engineering, fitness, files, automation, settings." },
+        module: { type: "string", description: "Module id: dashboard, assistant, agent, terminal, security, network, projects, school, calendar, encyclopedia, engineering, fitness, files, automation, settings." },
       },
       required: ["module"],
     },
@@ -915,6 +929,23 @@ async function runAssistantTool(name, input, ctx) {
     if (name === "add_reminder") {
       const item = ctx.addReminder(input.text, input.due);
       return `Added reminder: "${item.text}"${item.due ? ` (due ${item.due})` : ""}.`;
+    }
+    if (name === "update_reminder") {
+      const rems = ctx.reminders || [];
+      const q = String(input.match || "").toLowerCase();
+      const hit = rems.find((r) => r.text.toLowerCase().includes(q));
+      if (!hit) return `No reminder matching "${input.match}". Current: ${rems.map((r) => r.text).join("; ") || "none"}.`;
+      const patch = {};
+      if (typeof input.text === "string" && input.text.trim()) patch.text = input.text.trim();
+      if (input.due !== undefined) patch.due = String(input.due).trim() || null;
+      if (typeof input.done === "boolean") patch.done = input.done;
+      ctx.updateReminder?.(hit.id, patch);
+      const bits = [];
+      if (patch.text) bits.push(`renamed to "${patch.text}"`);
+      if (patch.due) bits.push(`due ${patch.due}`);
+      else if (patch.due === null) bits.push("date cleared");
+      if (patch.done !== undefined) bits.push(patch.done ? "marked done" : "marked not done");
+      return `Updated "${hit.text}"${bits.length ? ` — ${bits.join(", ")}` : ""}.`;
     }
     if (name === "log_workout") {
       if (!ctx.logWorkout) return "The fitness log isn't available right now.";
@@ -1428,7 +1459,7 @@ function buildSystemPrompt(t, online, launchApps) {
     `Live system snapshot: ${snapshot}. Network: ${online ? "online" : "offline"}.`,
     `Modules available: ${built}.`,
     "The Terminal module runs a real shell on the user's machine (real commands, real output) — never describe it as a mock or simulation.",
-    "You can take real actions with your tools, and you should when asked: add/complete/delete reminders, log workouts, navigate to any module, open apps or websites, add or remove Quick Launch apps, show or hide modules, clear this conversation, replay the tutorial, and change ANY setting — theme, accent, density, interface toggles, your own voice (male/female British), whether you speak replies, the launch greeting, school mode, and what to call the user. Basically anything the user can do in the app, you can do too. When they ask, call the matching tool — never say you can't change something like your voice or school mode; you can.",
+    "You can take real actions with your tools, and you should when asked: add/reschedule/complete/delete reminders and calendar items (add_reminder with a date puts it on the calendar; update_reminder moves, renames, or completes it), log workouts, navigate to any module including the calendar, open apps or websites, add or remove Quick Launch apps, show or hide modules, clear this conversation, replay the tutorial, and change ANY setting — theme, accent, density, interface toggles, your own voice (male/female British), whether you speak replies, the launch greeting, school mode, and what to call the user. Basically anything the user can do in the app, you can do too. When they ask, call the matching tool — never say you can't do something like move a calendar item or change your voice; you can.",
     "You can also READ the user's real data with tools: current weather, live system stats (CPU/memory/disk/temp/network), their reminders, logged workouts, projects and git status, network info (IP/gateway), indexed files, and saved apps. When they ask about any of these — like 'what's the weather', 'how's my CPU', 'what's on my list', 'what's my IP' — call the matching tool to look it up instead of saying you don't have access. You have access; use the tool.",
     // Routing. Without this the model either answers from memory when it could
     // have checked, or hands trivial one-liners to a full agent run.
