@@ -608,6 +608,33 @@ const ASSISTANT_TOOLS = [
     input_schema: { type: "object", properties: {} },
   },
   {
+    name: "ping",
+    description: "Ping a host to check if it's reachable and how fast. Use when the user asks to ping something, whether a site or device is up, or how fast their connection to it is.",
+    input_schema: {
+      type: "object",
+      properties: { host: { type: "string", description: "Hostname or IP, e.g. 'google.com' or '192.168.1.1'." } },
+      required: ["host"],
+    },
+  },
+  {
+    name: "dns_lookup",
+    description: "Resolve a hostname to its IP address(es) via DNS. Use when the user asks for a site's IP or to check whether DNS resolves.",
+    input_schema: {
+      type: "object",
+      properties: { host: { type: "string", description: "Hostname, e.g. 'github.com'." } },
+      required: ["host"],
+    },
+  },
+  {
+    name: "traceroute",
+    description: "Trace the network route (hops) to a host. Use when the user asks where the latency is or wants to see the path to a destination. Takes a few seconds.",
+    input_schema: {
+      type: "object",
+      properties: { host: { type: "string", description: "Hostname or IP to trace to." } },
+      required: ["host"],
+    },
+  },
+  {
     name: "list_files",
     description: "List the files in the user's currently indexed folder (name, path, size). Use when they ask what files they have or to find a file. Returns nothing if no folder is indexed.",
     input_schema: {
@@ -853,6 +880,25 @@ async function runAssistantTool(name, input, ctx) {
       if (!isDesktop) return "Network info needs the desktop app.";
       const n = await inv("net_info");
       return `Local IP ${n.local_ip}, gateway ${n.gateway}, interface ${n.iface}.`;
+    }
+    if (name === "ping") {
+      if (!isDesktop) return "Ping needs the desktop app.";
+      try { const ms = await inv("ping_host", { host: input.host }); return `${input.host} replied in ${ms} ms.`; }
+      catch (e) { return `Couldn't reach ${input.host}: ${e}.`; }
+    }
+    if (name === "dns_lookup") {
+      if (!isDesktop) return "DNS lookup needs the desktop app.";
+      try {
+        const ips = await inv("dns_lookup", { host: input.host });
+        return ips?.length ? `${input.host} resolves to ${ips.join(", ")}.` : `No DNS records found for ${input.host}.`;
+      } catch (e) { return `DNS lookup failed for ${input.host}: ${e}.`; }
+    }
+    if (name === "traceroute") {
+      if (!isDesktop) return "Traceroute needs the desktop app.";
+      try {
+        const hops = await inv("traceroute", { host: input.host });
+        return hops?.length ? `Route to ${input.host}:\n${hops.join("\n")}` : `No route data for ${input.host}.`;
+      } catch (e) { return `Traceroute failed for ${input.host}: ${e}.`; }
     }
     if (name === "list_files") {
       if (!isDesktop) return "File listing needs the desktop app.";
@@ -1520,7 +1566,7 @@ function buildSystemPrompt(t, online, launchApps) {
     `Modules available: ${built}.`,
     "The Terminal module runs a real shell on the user's machine (real commands, real output) — never describe it as a mock or simulation.",
     "You can take real actions with your tools, and you should when asked: add/reschedule/complete/delete reminders and calendar items (add_reminder with a date puts it on the calendar; update_reminder moves, renames, or completes it), log workouts, navigate to any module including the calendar, open apps or websites, add or remove Quick Launch apps, show or hide modules, clear this conversation, replay the tutorial, and change ANY setting — theme, accent, density, interface toggles, your own voice (male/female British), whether you speak replies, the launch greeting, school mode, and what to call the user. Basically anything the user can do in the app, you can do too. When they ask, call the matching tool — never say you can't do something like move a calendar item or change your voice; you can.",
-    "You can also READ the user's real data with tools: current weather, live system stats (CPU/memory/disk/temp/network), their reminders, logged workouts, projects and git status, network info (IP/gateway), indexed files, and saved apps. When they ask about any of these — like 'what's the weather', 'how's my CPU', 'what's on my list', 'what's my IP' — call the matching tool to look it up instead of saying you don't have access. You have access; use the tool.",
+    "You can also READ the user's real data with tools: current weather, live system stats (CPU/memory/disk/temp/network), their reminders, logged workouts, projects and git status, network info (IP/gateway), indexed files, and saved apps. You can also run network diagnostics: ping a host, DNS-resolve a hostname to its IP, and traceroute the path to a destination. When they ask about any of these — like 'what's the weather', 'how's my CPU', 'what's on my list', 'what's my IP', 'ping google', 'what's github's IP', 'why is my connection slow to X' — call the matching tool to look it up or run it instead of saying you don't have access. You have access; use the tool.",
     // Routing. Without this the model either answers from memory when it could
     // have checked, or hands trivial one-liners to a full agent run.
     "You can also act on the machine itself, and you should decide HOW before you answer. Three levels, cheapest first. (1) If you simply know the answer, say it. (2) If one short command would settle it — a version, whether something is installed, free disk space, what is in a folder — call run_command and answer from the real output. Prefer checking over guessing: 'let me look' beats a confident maybe. (3) If it takes more than one command, or installs, updates, configures, fixes or follows a walkthrough, call start_agent_task and let Agent Mode do it.",
