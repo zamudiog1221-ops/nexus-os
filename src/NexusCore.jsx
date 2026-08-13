@@ -1305,36 +1305,44 @@ const ORBIT = [
   { id: "calendar",     area: "l" },
 ];
 
-// The dashboard is a tile grid, view and editor in one. Each widget keeps its
-// own size; dragging only reorders (nobody gets resized by a move), and a size
-// chip cycles a widget bigger/smaller. The core is just a large glowing tile.
-function Dashboard({ layout, setLayout, edit, ctx }) {
+function OrbitDashboard({ ctx, layout, setLayout, edit }) {
+  // Each widget's orbit slot (a-l or core) is stored on its layout item as
+  // `area`; if it was never set, we fall back to the original ORBIT position.
+  // `area: null` means "no orbit slot" - it flows into the extras row below.
+  // Rearrange edits these areas in place, so what you see is what saves.
+  const slotOf = new Map(ORBIT.map((o) => [o.id, o.area]));
+  const areaOf = (item) => (item.area === undefined ? (slotOf.get(item.id) ?? null) : item.area);
+  const areaSet = new Set(ORBIT.map((o) => o.area));
+  const schoolMode = ctx.settings?.schoolMode;
+  const aiWidget = (id) => id === "quickchat";
+
+  // Pointer-based drag (native HTML5 DnD is unreliable inside the webview).
   const dragIdRef = useRef(null);
   const [dragId, setDragId] = useState(null);
   const [overId, setOverId] = useState(null);
-  const schoolMode = ctx.settings?.schoolMode;
-  const aiWidget = (id) => id === "quickchat";
-  const items = layout.filter((it) => WIDGET_MAP.get(it.id) && !(schoolMode && aiWidget(it.id)));
+
+  const visible = layout.filter((it) => WIDGET_MAP.get(it.id) && !(schoolMode && aiWidget(it.id)));
+  const framed = visible.filter((it) => areaSet.has(areaOf(it)));
+  const extras = visible.filter((it) => !areaSet.has(areaOf(it)));
+
+  // Swap two widgets' slots. Handles orbit<->orbit, orbit<->extras, and the core.
+  const swap = (aId, bId) => {
+    if (!aId || !bId || aId === bId) return;
+    setLayout((p) => {
+      const a = p.find((x) => x.id === aId), b = p.find((x) => x.id === bId);
+      if (!a || !b) return p;
+      const aArea = a.area === undefined ? (slotOf.get(a.id) ?? null) : a.area;
+      const bArea = b.area === undefined ? (slotOf.get(b.id) ?? null) : b.area;
+      return p.map((x) =>
+        x.id === aId ? { ...x, area: bArea } : x.id === bId ? { ...x, area: aArea } : x);
+    });
+  };
+  const removeWidget = (id) => setLayout((p) => p.filter((x) => x.id !== id));
 
   const cellUnder = (x, y) => {
     const el = document.elementFromPoint(x, y);
-    const c = el && el.closest && el.closest("[data-wid]");
-    return c ? c.getAttribute("data-wid") : null;
-  };
-
-  // Move the dragged widget to sit just before the drop target. Sizes untouched.
-  const moveBefore = (srcId, targetId) => {
-    if (!srcId || !targetId || srcId === targetId) return;
-    setLayout((p) => {
-      const from = p.findIndex((x) => x.id === srcId);
-      if (from < 0) return p;
-      const next = [...p];
-      const [moved] = next.splice(from, 1);
-      const at = next.findIndex((x) => x.id === targetId);
-      if (at < 0) return p;
-      next.splice(at, 0, moved);
-      return next;
-    });
+    const cell = el && el.closest && el.closest("[data-wid]");
+    return cell ? cell.getAttribute("data-wid") : null;
   };
 
   const startDrag = (e, id) => {
@@ -1347,7 +1355,7 @@ function Dashboard({ layout, setLayout, edit, ctx }) {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       const target = cellUnder(ev.clientX, ev.clientY);
-      if (target) moveBefore(dragIdRef.current, target);
+      if (target) swap(dragIdRef.current, target);
       dragIdRef.current = null;
       setDragId(null);
       setOverId(null);
@@ -1356,38 +1364,51 @@ function Dashboard({ layout, setLayout, edit, ctx }) {
     window.addEventListener("pointerup", up);
   };
 
-  const cycleSize = (id) => setLayout((p) => p.map((x) =>
-    x.id === id ? { ...x, size: SIZE_ORDER[(SIZE_ORDER.indexOf(x.size) + 1) % SIZE_ORDER.length] } : x));
-  const removeWidget = (id) => setLayout((p) => p.filter((x) => x.id !== id));
+  const cell = (item, framedCell) => {
+    const w = WIDGET_MAP.get(item.id);
+    const area = areaOf(item);
+    const isCore = area === "core";
+    return (
+      <div key={item.id} data-wid={item.id}
+        className={`nx-orbit-cell${framedCell ? "" : " nx-orbit-cell-extra"}${dragId === item.id ? " nx-cell-drag" : ""}${overId === item.id && dragId && dragId !== item.id ? " nx-cell-over" : ""}`}
+        style={framedCell ? { gridArea: area } : undefined}>
+        <article className={`nx-w${isCore ? " nx-w-core" : ""}${edit ? " nx-w-editing" : ""}`}>
+          {edit && (
+            <div className="nx-w-edit-bar" onPointerDown={(e) => { if (!e.target.closest(".nx-w-x")) startDrag(e, item.id); }}>
+              <span className="nx-w-grip"><GripVertical size={12} /> drag to swap</span>
+              <button className="nx-w-x" title="Remove widget" onClick={() => removeWidget(item.id)}><X size={12} /></button>
+            </div>
+          )}
+          <header className="nx-w-head"><w.icon size={13} /><h3>{w.title}</h3></header>
+          <div className="nx-w-body">
+            <WidgetBoundary title={w.title}>{w.render(ctx)}</WidgetBoundary>
+          </div>
+        </article>
+      </div>
+    );
+  };
 
   return (
-    <div className={`nx-grid${edit ? " nx-grid-edit" : ""}`}>
-      {items.map((item) => {
-        const w = WIDGET_MAP.get(item.id);
-        const isCore = item.id === "coremap";
-        const size = item.size || "sm";
-        return (
-          <article key={item.id} data-wid={item.id}
-            className={`nx-w nx-w-${size}${isCore ? " nx-w-core" : ""}${edit ? " nx-w-editing" : ""}${dragId === item.id ? " nx-cell-drag" : ""}${overId === item.id && dragId && dragId !== item.id ? " nx-cell-over" : ""}`}>
-            {edit && (
-              <div className="nx-w-edit-bar" onPointerDown={(e) => { if (!e.target.closest(".nx-w-ctl")) startDrag(e, item.id); }}>
-                <span className="nx-w-grip"><GripVertical size={12} /> drag</span>
-                <span className="nx-w-ctls">
-                  <button className="nx-w-ctl" title="Resize" onClick={() => cycleSize(item.id)}>{SIZE_LABEL[size] || "1×1"}</button>
-                  <button className="nx-w-ctl nx-w-x" title="Remove widget" onClick={() => removeWidget(item.id)}><X size={12} /></button>
-                </span>
-              </div>
-            )}
-            <header className="nx-w-head"><w.icon size={13} /><h3>{w.title}</h3></header>
-            <div className="nx-w-body">
-              <WidgetBoundary title={w.title}>{w.render(ctx)}</WidgetBoundary>
-            </div>
-          </article>
-        );
-      })}
+    <>
+      <div className={`nx-orbit-grid${edit ? " nx-orbit-edit" : ""}`}>
+        {framed.map((it) => cell(it, true))}
+      </div>
+      {(extras.length > 0 || edit) && (
+        <div className="nx-orbit-extras">
+          {extras.map((it) => cell(it, false))}
+          {edit && extras.length === 0 && <p className="nx-tool-note nx-tool-note-flush">Widgets you add or drag out land here.</p>}
+        </div>
+      )}
       {edit && <AddTray layout={layout} setLayout={setLayout} />}
-    </div>
+    </>
   );
+}
+
+// The orbit is both the view and the editor now: Rearrange keeps the same look
+// and lets you drag widgets to swap slots (including the core), remove them, and
+// add more - all in place, all saved. No separate grid mode.
+function Dashboard({ layout, setLayout, edit, ctx }) {
+  return <OrbitDashboard ctx={ctx} layout={layout} setLayout={setLayout} edit={edit} />;
 }
 
 function AddTray({ layout, setLayout }) {
@@ -10478,10 +10499,9 @@ function KeySetup({ onDone }) {
 
 export default function NexusCore() {
   const [active, setActive] = useState("dashboard");
-  // v4: dashboard moved from the fixed orbit to a resizable tile grid, so the
-  // old saved layouts (orbit slots, experiment leftovers) are reset to a clean
-  // default with the big core tile and every widget present.
-  const [layout, setLayout] = usePersistent("layout-v4", DEFAULT_LAYOUT);
+  // v5: reverted to the fixed orbit layout (the clean symmetric look). Bumping
+  // the key clears the grid-era saved state so it loads the orbit default.
+  const [layout, setLayout] = usePersistent("layout-v5", DEFAULT_LAYOUT);
   const [edit, setEdit] = useState(false);
   const [demo] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
