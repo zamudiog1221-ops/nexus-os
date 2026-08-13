@@ -643,6 +643,15 @@ const ASSISTANT_TOOLS = [
     },
   },
   {
+    name: "read_file",
+    description: "Read the text content of a file in the user's indexed folder so you can answer questions about it or summarize it. Match by file name. Text files only (code, markdown, txt, etc.).",
+    input_schema: {
+      type: "object",
+      properties: { name: { type: "string", description: "The file name (or part of it) to read, e.g. 'notes.md'." } },
+      required: ["name"],
+    },
+  },
+  {
     name: "get_launch_apps",
     description: "List the user's saved Quick Launch apps. Use to see what you can open for them or when they ask what apps are set up.",
     input_schema: { type: "object", properties: {} },
@@ -911,6 +920,17 @@ async function runAssistantTool(name, input, ctx) {
       return `Files${q ? ` matching "${input.query}"` : ""} (${filtered.length}): ` +
         filtered.slice(0, 25).map((f) => `${f.name} (${f.size})`).join(", ") +
         (filtered.length > 25 ? `, and ${filtered.length - 25} more.` : ".");
+    }
+    if (name === "read_file") {
+      if (!isDesktop) return "Reading files needs the desktop app.";
+      const folder = ctx.filesFolder;
+      if (!folder) return "No folder is indexed yet. The user can index one in the Files module.";
+      const files = await inv("index_folder", { path: folder, recursive: true });
+      const q = String(input.name || "").toLowerCase();
+      const hit = files.find((f) => f.name.toLowerCase() === q) || files.find((f) => f.name.toLowerCase().includes(q));
+      if (!hit) return `No file matching "${input.name}" in the indexed folder.`;
+      if (!hit.body) return `"${hit.name}" has no readable text — it may be a binary or unsupported file type.`;
+      return `Content of ${hit.name}:\n\n${hit.body}`;
     }
     if (name === "get_launch_apps") {
       const apps = ctx.launchApps || [];
