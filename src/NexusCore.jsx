@@ -10447,7 +10447,10 @@ function KeySetup({ onDone }) {
 
 export default function NexusCore() {
   const [active, setActive] = useState("dashboard");
-  const [layout, setLayout] = usePersistent("layout-v3", DEFAULT_LAYOUT);
+  // v4: dashboard moved from the fixed orbit to a resizable tile grid, so the
+  // old saved layouts (orbit slots, experiment leftovers) are reset to a clean
+  // default with the big core tile and every widget present.
+  const [layout, setLayout] = usePersistent("layout-v4", DEFAULT_LAYOUT);
   const [edit, setEdit] = useState(false);
   const [demo] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
