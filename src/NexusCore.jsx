@@ -9565,13 +9565,6 @@ const QUOTES = [
   { text: "The best revenge is not to be like your enemy.", who: "Marcus Aurelius", work: "Meditations" },
 ];
 
-const BOOT_ARCS = [
-  [0, 0, 0, 1], [70, 0, 0, 1], [0, 70, 0, 1], [55, 30, 20, 1],
-  [-45, 35, -15, 0.86], [72, 55, 45, 0.86], [25, 72, 0, 0.72],
-  [-30, -50, 25, 0.72], [60, -35, -30, 0.6], [82, 18, 60, 0.6],
-  [40, 40, -40, 0.5], [-20, 20, 70, 0.5],
-];
-
 function Splash({ onDone }) {
   const [quote] = useState(() => QUOTES[Math.floor(Math.random() * QUOTES.length)]);
   const [leaving, setLeaving] = useState(false);
@@ -9605,16 +9598,14 @@ function Splash({ onDone }) {
       aria-label={`${quote.text} — ${quote.who}. Continue to Nexus.`}>
       <div className="nx-splash-inner">
         <div className="nx-boot">
-          <span className="nx-boot-glow" />
-          <div className="nx-boot-bloom">
-            <div className="nx-boot-orb">
-              {BOOT_ARCS.map((a, i) => (
-                <span key={i} className="nx-boot-arc"
-                  style={{ transform: `rotateX(${a[0]}deg) rotateY(${a[1]}deg) rotateZ(${a[2]}deg) scale(${a[3]})` }} />
-              ))}
-            </div>
-          </div>
-          <span className="nx-boot-core" />
+          <span className="nx-hud-glow" />
+          <span className="nx-hud-ring nx-hud-r1" />
+          <span className="nx-hud-ring nx-hud-r2" />
+          <span className="nx-hud-ring nx-hud-r3" />
+          <span className="nx-hud-ticks" />
+          <span className="nx-hud-sweep" />
+          <span className="nx-hud-reticle" />
+          <span className="nx-hud-core" />
         </div>
         <div className="nx-boot-word">NEXUS</div>
         <blockquote className="nx-splash-quote nx-boot-fade">{quote.text}</blockquote>
@@ -12375,31 +12366,50 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-splash-out{animation:nx-splash-out .62s cubic-bezier(.4,0,.6,1) forwards;}
 .nx-splash-inner{max-width:760px;display:flex;flex-direction:column;align-items:center;
   justify-content:center;}
-.nx-boot{position:relative;width:230px;height:230px;display:grid;place-items:center;
-  perspective:640px;}
-.nx-boot-bloom{position:absolute;width:190px;height:190px;transform-style:preserve-3d;
-  animation:nx-boot-bloom 1.2s cubic-bezier(.2,.8,.2,1) both;}
-.nx-boot-orb{position:absolute;inset:0;transform-style:preserve-3d;
-  animation:nx-boot-spin 16s linear infinite;}
-.nx-boot-arc{position:absolute;inset:0;border-radius:50%;
-  border:1.5px solid rgba(255,168,52,0.55);
-  box-shadow:0 0 8px rgba(255,150,30,0.35),inset 0 0 12px rgba(255,150,30,0.18);}
-.nx-boot-glow{position:absolute;width:230px;height:230px;border-radius:50%;
-  background:radial-gradient(circle,rgba(255,150,30,0.5),rgba(255,120,20,0.12) 42%,transparent 68%);
-  filter:blur(4px);animation:nx-boot-glow 1.4s ease both,nx-breathe 4s ease-in-out 1.4s infinite;}
-.nx-boot-core{position:absolute;width:16px;height:16px;border-radius:50%;
-  background:radial-gradient(circle,#fff7e6,#ffb545 55%,#ff8c1a);
-  box-shadow:0 0 22px #ffb545,0 0 60px #ff8c1a,0 0 120px rgba(255,140,25,0.6);
-  animation:nx-boot-core 1s cubic-bezier(.2,.8,.2,1) both;}
-.nx-boot-word{margin-top:22px;font-size:clamp(26px,5vw,54px);font-weight:200;
-  letter-spacing:0.55em;text-indent:0.55em;color:#ffd9a0;
-  text-shadow:0 0 20px rgba(255,150,30,0.4);
+.nx-boot{position:relative;width:250px;height:250px;display:grid;place-items:center;}
+.nx-hud-glow{position:absolute;width:250px;height:250px;border-radius:50%;
+  background:radial-gradient(circle,var(--glow),var(--glow-faint) 45%,transparent 70%);
+  filter:blur(3px);animation:nx-hud-fade 1.2s ease both,nx-breathe 4s ease-in-out 1.3s infinite;}
+.nx-hud-ring{position:absolute;inset:0;margin:auto;border-radius:50%;
+  border:1.5px solid var(--glow-soft);
+  box-shadow:0 0 10px var(--glow-faint),inset 0 0 14px var(--glow-faint);}
+.nx-hud-r1{width:72px;height:72px;border-top-color:var(--signal);border-right-color:var(--signal);
+  animation:nx-hud-draw .9s .05s ease both,nx-spin-cw 9s linear 1s infinite;}
+.nx-hud-r2{width:150px;height:150px;border-bottom-color:var(--signal);border-left-color:var(--signal);
+  animation:nx-hud-draw 1s .12s ease both,nx-spin-ccw 16s linear 1.1s infinite;}
+.nx-hud-r3{width:224px;height:224px;border-top-color:var(--signal);
+  animation:nx-hud-draw 1.1s .2s ease both,nx-spin-cw 26s linear 1.2s infinite;}
+.nx-hud-ticks{position:absolute;inset:0;margin:auto;width:190px;height:190px;border-radius:50%;
+  background:repeating-conic-gradient(from 0deg,var(--glow-soft) 0deg 0.6deg,transparent 0.6deg 6deg);
+  -webkit-mask:radial-gradient(circle,transparent 90px,#000 90px,#000 95px,transparent 95px);
+          mask:radial-gradient(circle,transparent 90px,#000 90px,#000 95px,transparent 95px);
+  animation:nx-hud-draw 1s .3s ease both,nx-spin-ccw 44s linear 1.3s infinite;}
+.nx-hud-sweep{position:absolute;inset:0;margin:auto;width:150px;height:150px;border-radius:50%;
+  background:conic-gradient(from 0deg,transparent 0deg,var(--glow-faint) 42deg,var(--glow) 76deg,transparent 80deg);
+  -webkit-mask:radial-gradient(circle,#000 74px,transparent 75px);
+          mask:radial-gradient(circle,#000 74px,transparent 75px);
+  animation:nx-hud-fade 1s .5s ease both,nx-spin-cw 3.6s linear 1.1s infinite;}
+.nx-hud-reticle{position:absolute;inset:0;margin:auto;width:224px;height:224px;
+  background:
+    linear-gradient(var(--glow-soft),var(--glow-soft)) center/1px 100% no-repeat,
+    linear-gradient(var(--glow-soft),var(--glow-soft)) center/100% 1px no-repeat;
+  -webkit-mask:radial-gradient(circle,transparent 40px,#000 42px,#000 108px,transparent 112px);
+          mask:radial-gradient(circle,transparent 40px,#000 42px,#000 108px,transparent 112px);
+  animation:nx-hud-fade 1.1s .55s ease both;}
+.nx-hud-core{position:absolute;width:14px;height:14px;border-radius:50%;
+  background:radial-gradient(circle,#ffffff,var(--signal) 58%,var(--signal));
+  box-shadow:0 0 18px var(--signal),0 0 46px var(--glow),0 0 90px var(--glow-soft);
+  animation:nx-hud-core 1s .1s cubic-bezier(.2,.8,.2,1) both;}
+.nx-boot-word{margin-top:26px;font-size:clamp(26px,5vw,54px);font-weight:200;
+  letter-spacing:0.55em;text-indent:0.55em;color:var(--ice);
+  text-shadow:0 0 22px var(--glow),0 0 44px var(--glow-soft);
   animation:nx-boot-word 1.1s .55s cubic-bezier(.2,.7,.3,1) both;}
 .nx-boot-fade{animation:nx-boot-in .8s 1.35s ease both !important;}
-@keyframes nx-boot-core{0%{transform:scale(0);opacity:0;}45%{opacity:1;}100%{transform:scale(1);opacity:1;}}
-@keyframes nx-boot-glow{0%{transform:scale(0);opacity:0;}60%{opacity:1;}100%{transform:scale(1);opacity:1;}}
-@keyframes nx-boot-bloom{0%{transform:scale(0);opacity:0;}55%{opacity:1;}100%{transform:scale(1);opacity:1;}}
-@keyframes nx-boot-spin{from{transform:rotateY(0deg) rotateX(8deg);}to{transform:rotateY(360deg) rotateX(8deg);}}
+@keyframes nx-hud-fade{from{opacity:0;}to{opacity:1;}}
+@keyframes nx-hud-draw{0%{opacity:0;filter:blur(8px);}100%{opacity:1;filter:blur(0);}}
+@keyframes nx-hud-core{0%{transform:scale(0);opacity:0;}50%{opacity:1;}100%{transform:scale(1);opacity:1;}}
+@keyframes nx-spin-cw{to{transform:rotate(360deg);}}
+@keyframes nx-spin-ccw{to{transform:rotate(-360deg);}}
 @keyframes nx-boot-word{0%{opacity:0;letter-spacing:1.5em;filter:blur(7px);}
   100%{opacity:1;letter-spacing:0.55em;filter:blur(0);}}
 @keyframes nx-boot-in{from{opacity:0;transform:translateY(7px);}to{opacity:1;transform:none;}}
