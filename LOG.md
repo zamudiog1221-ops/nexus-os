@@ -189,6 +189,16 @@ The orbit-vs-grid tension is permanently resolved and documented; stop revisitin
 Keep-alive tabs mean per-module copies of shared state go stale - lift shared data to the shell.
 Comment-stripping by backtick heuristic is imperfect (backticks in strings/comments desync it) but safe - it under-removes rather than corrupting strings.
 
+2026-08-13 (cont.) — Wake word + launch animation, folder-copy fix
+
+Did:
+
+Resolved a two-copy mess: OneDrive had backed up the Desktop, so there were two nexus-os folders (real local one with all our work + git history, and a stale OneDrive copy). Keeper is C:\Users\zamud\Desktop\nexus-os. User to delete/rename the OneDrive copy.
+Wake word "Nexus": always-on SpeechRecognition in VoiceOverlay listens for "nexus" while idle; on hearing it, either processes the trailing command inline ("Nexus, what's the weather") or opens a hands-free listen. Pauses while hold-to-talk / active listening owns the mic; resumes when idle. Settings toggle (default on), assistant set_setting("wakeword"), and a small "Say Nexus" idle pill.
+Launch animation: Jarvis-style bloom on the splash - core ignites from a point, three rings ripple outward, NEXUS wordmark resolves from wide-blurred to set, then the quote fades in. First pass, tune against Gio's reference clip.
+
+Next: wake-word real-use test (false triggers?), tune the launch animation to the reference. Bigger items still: Ubuntu VM boot (PC 2), the rest of Phase 3+.
+
 Template
 ## YYYY-MM-DD — Short title (~Nh)
 
