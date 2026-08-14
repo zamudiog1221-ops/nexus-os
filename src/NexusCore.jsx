@@ -990,6 +990,11 @@ async function runAssistantTool(name, input, ctx) {
         ctx.setSettings((p) => ({ ...p, [realKey]: on }));
         return `${realKey === "voiceSpeak" ? "Speaking replies aloud" : "Launch greeting"} turned ${on ? "on" : "off"}.`;
       }
+      if (["wakeword", "wake_word", "wake"].includes(key)) {
+        const on = ["on", "true", "yes", "enable", "enabled"].includes(raw);
+        ctx.setSettings((p) => ({ ...p, wakeWord: on }));
+        return `Wake word "${on ? "on — say Nexus to talk" : "off"}".`;
+      }
       if (["voice", "voicegender", "voice_gender"].includes(key)) {
         const g = raw.includes("male") && !raw.includes("female") ? "male" : raw.includes("female") ? "female" : null;
         if (!g) return "Voice is either male or female.";
@@ -9072,6 +9077,9 @@ function SettingsView({ ctx }) {
 
             <VoiceKeybind s={s} set={set} ctx={ctx} />
             <ElevenPanel ctx={ctx} />
+            <Toggle label="Wake word (“Nexus”)" on={s.wakeWord !== false}
+              onChange={(v) => set((p) => ({ ...p, wakeWord: v }))}
+              note="Always listens for “Nexus” — say it, then your request. No key to hold." />
             <Toggle label="Speak replies aloud" on={s.voiceSpeak !== false}
               onChange={(v) => set((p) => ({ ...p, voiceSpeak: v }))}
               note="Reads the assistant's answer back to you." />
@@ -9268,7 +9276,7 @@ const DEFAULT_SETTINGS = {
   motion: true, splash: true, ask: true,
   sound: true, volume: 1, hover: false, hidden: [],
   schoolMode: false, schoolKey: "Alt+S",
-  voiceKey: "t", voiceSpeak: true, voiceGender: "female",
+  voiceKey: "t", voiceSpeak: true, voiceGender: "female", wakeWord: true,
   userName: "", greetVoice: true, launchCount: 0, tutorialSeen: false,
 };
 
@@ -9845,6 +9853,8 @@ function VoiceOverlay({ ctx, settings }) {
   const autoListeningRef = useRef(false); // hands-free listening after a question
   const silenceRef = useRef(null);        // silence timer for auto-listen
   const autoListenRef = useRef(null);     // holds the autoListen fn for process() to call
+  const wakeRef = useRef(null);           // always-on "Nexus" wake-word recognizer
+  const wakeActiveRef = useRef(false);
 
   const key = settings.voiceKey || "t";
   const speakBack = settings.voiceSpeak !== false;
@@ -9976,12 +9986,49 @@ function VoiceOverlay({ ctx, settings }) {
     setTimeout(() => { if (autoListeningRef.current && !gotSpeech) finish(); }, 8000);
   };
 
+  const stopWake = () => {
+    wakeActiveRef.current = false;
+    try { wakeRef.current?.stop(); } catch { /* no-op */ }
+    wakeRef.current = null;
+  };
+
+  const startWake = () => {
+    if (!SPEECH || wakeActiveRef.current || heldRef.current || autoListeningRef.current) return;
+    if (!settings.wakeWord || schoolRef.current) return;
+    wakeActiveRef.current = true;
+    const rec = new SPEECH();
+    rec.continuous = true; rec.interimResults = true; rec.lang = "en-US"; rec.maxAlternatives = 1;
+    rec.onresult = (e) => {
+      let txt = "";
+      for (let i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript + " ";
+      txt = txt.toLowerCase();
+      const idx = txt.lastIndexOf("nexus");
+      if (idx >= 0) {
+        const after = txt.slice(idx + 5).replace(/[^a-z0-9\s]/g, "").trim();
+        stopWake();
+        if (after.length >= 2) processRef.current(after);
+        else autoListenRef.current?.();
+      }
+    };
+    rec.onend = () => { if (wakeActiveRef.current) { try { rec.start(); } catch { /* race */ } } };
+    rec.onerror = (ev) => { if (ev && ev.error === "not-allowed") stopWake(); };
+    try { rec.start(); wakeRef.current = rec; } catch { wakeActiveRef.current = false; }
+  };
+
+  useEffect(() => {
+    if (!SPEECH) return;
+    if (phase === "idle" && settings.wakeWord && !settings.schoolMode) startWake();
+    else stopWake();
+    return stopWake;
+  }, [phase, settings.wakeWord, settings.schoolMode]);
+
   useEffect(() => {
     if (!SPEECH) return; // recognition unavailable in this browser at all
 
     const startListen = () => {
       if (heldRef.current) return;
       cancelAuto();            // if we were hands-free listening, the key takes over
+      stopWake();              // the wake recognizer must release the mic first
       heldRef.current = true;
       finalRef.current = "";
       setHeard(""); setReply(""); setPhase("listening");
@@ -10055,7 +10102,14 @@ function VoiceOverlay({ ctx, settings }) {
   }, []);
 
   if (settings.schoolMode || !SPEECH) return null;
-  if (phase === "idle") return null;
+  if (phase === "idle") {
+    if (!settings.wakeWord) return null;
+    return (
+      <div className="nx-wake" title="Say 'Nexus' to talk">
+        <span className="nx-wake-dot" />Say “Nexus”
+      </div>
+    );
+  }
 
   return (
     <div className="nx-voice">
@@ -11302,6 +11356,12 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 @keyframes nx-fade{from{opacity:0;}to{opacity:1;}}
 
 /* voice assistant overlay */
+.nx-wake{position:fixed;right:22px;bottom:20px;z-index:170;pointer-events:none;
+  display:flex;align-items:center;gap:8px;padding:7px 13px;border-radius:20px;
+  border:1px solid var(--edge);background:rgba(4,6,12,0.6);backdrop-filter:blur(10px);
+  font-size:11.5px;color:var(--muted-2);letter-spacing:0.02em;opacity:0.75;}
+.nx-wake-dot{width:8px;height:8px;border-radius:50%;background:var(--signal);
+  box-shadow:0 0 10px var(--signal);animation:nx-pulse 2.4s ease-in-out infinite;}
 .nx-voice{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);z-index:180;
   pointer-events:none;animation:nx-voice-in .28s cubic-bezier(.2,.7,.3,1) both;}
 .nx-voice-card{display:flex;align-items:center;gap:16px;min-width:340px;max-width:560px;
