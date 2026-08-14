@@ -1,8 +1,3 @@
-// NEXUS OS  -  Tauri backend
-// Every #[command] below is the real counterpart to a mock adapter in the
-// frontend. The frontend calls these with invoke("name", { args }); the
-// return shapes match what the mock versions produced, so the UI does not
-// change  -  only the source of the data does.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -12,14 +7,8 @@ use std::sync::Mutex;
 use sysinfo::{Disks, Networks, System};
 use tauri::{Manager, State};
 
-// The unattended-execution layer. Kept in its own file because it has very
-// different rules from the interactive commands above: timeouts, kill trees,
-// truncation, and a journal that outlives the window.
 mod agent;
 mod platform;
-
-// sysinfo wants to be reused between reads so it can compute deltas (CPU %,
-// network throughput). One instance, guarded by a mutex, refreshed per call.
 
 struct Telemetry {
     sys: Mutex<System>,
@@ -50,7 +39,6 @@ fn telemetry(state: State<Telemetry>) -> Frame {
     let used = sys.used_memory() as f32;
     let mem = if total > 0.0 { used / total * 100.0 } else { 0.0 };
 
-    // disk: usage of the largest mounted volume
     let disks = Disks::new_with_refreshed_list();
     let disk = disks
         .list()
@@ -63,7 +51,6 @@ fn telemetry(state: State<Telemetry>) -> Frame {
         })
         .unwrap_or(0.0);
 
-    // network throughput: bytes since last call / elapsed seconds
     let mut nets = state.networks.lock().unwrap();
     nets.refresh();
     let (mut rx, mut tx) = (0u64, 0u64);
@@ -77,7 +64,6 @@ fn telemetry(state: State<Telemetry>) -> Frame {
     let up = ((tx.saturating_sub(last.1)) as f32 * 8.0 / 1_000_000.0) / elapsed;
     *last = (rx, tx, std::time::Instant::now());
 
-    // temperature: components vary by platform; take the hottest sensor
     let temp = {
         let comps = sysinfo::Components::new_with_refreshed_list();
         comps
@@ -98,10 +84,6 @@ fn telemetry(state: State<Telemetry>) -> Frame {
         used_mem_gb: used / 1_048_576.0 / 1024.0,
     }
 }
-
-// Replaces MockShell.run(). Runs a command in the given working directory and
-// returns stdout, stderr and the exit code. The frontend already parses this
-// shape; the difference is these are real processes.
 
 #[derive(Serialize)]
 struct ShellResult {
@@ -148,10 +130,6 @@ fn dirs_home() -> String {
         .unwrap_or_else(|_| ".".into())
 }
 
-// Find folders whose name contains the query, so the user can jump into a
-// project by typing part of its name instead of a full path. Searches the home
-// tree (deep) plus the drive root (shallow), skipping heavy/system dirs, with a
-// hard budget so it stays fast.
 #[derive(Serialize)]
 struct FolderHit {
     name: String,
@@ -167,7 +145,6 @@ fn find_folders(query: String) -> Result<Vec<FolderHit>, String> {
     }
     let home = dirs_home();
     let home_path = std::path::PathBuf::from(&home);
-    // (dir, remaining depth). Home gets a deep budget; the drive root a shallow one.
     let mut stack: Vec<(std::path::PathBuf, usize)> = vec![(home_path.clone(), 6)];
     if let Some(root) = home_path.ancestors().last() {
         if root != home_path {
@@ -216,13 +193,10 @@ fn find_folders(query: String) -> Result<Vec<FolderHit>, String> {
             }
         }
     }
-    // Shorter paths first (closer to home / more likely what they meant).
     hits.sort_by(|a, b| a.path.len().cmp(&b.path.len()).then_with(|| a.name.cmp(&b.name)));
     hits.dedup_by(|a, b| a.path == b.path);
     Ok(hits)
 }
-
-// Replaces MockNet.resolve(). Uses the system resolver.
 
 #[tauri::command]
 fn dns_lookup(host: String) -> Result<Vec<String>, String> {
@@ -238,9 +212,6 @@ fn dns_lookup(host: String) -> Result<Vec<String>, String> {
             out
         })
 }
-
-// Replaces MockNet.ping(). Shells out to the system ping once and parses the
-// round-trip time. Cross-platform flag handling.
 
 #[tauri::command]
 fn ping_host(host: String) -> Result<f32, String> {
@@ -259,7 +230,6 @@ fn ping_host(host: String) -> Result<f32, String> {
     let out = c.output().map_err(|e| format!("ping failed: {e}"))?;
     let text = String::from_utf8_lossy(&out.stdout);
 
-    // both platforms print "time=1.23 ms" / "time=1.23ms" / "time<1ms"
     for token in text.split_whitespace() {
         if let Some(rest) = token.strip_prefix("time=") {
             let num: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
@@ -270,9 +240,6 @@ fn ping_host(host: String) -> Result<f32, String> {
     }
     Err("no reply".into())
 }
-
-// Reads the machine's actual local IP, gateway, and interface by parsing the
-// platform's own tools. No third-party crates, no raw sockets.
 
 #[derive(Serialize)]
 struct NetInfo {
@@ -294,13 +261,8 @@ struct Snapshot {
     top: Vec<ProcInfo>,     // heaviest processes by memory
 }
 
-// A read-only snapshot of the machine's current posture: which TCP ports are
-// listening, how many processes are running, and the heaviest few by memory.
-// The frontend saves one of these as a "baseline" and compares later ones to
-// it  -  that's the Cyber Twin. All real, all local.
 #[tauri::command]
 fn system_snapshot() -> Result<Snapshot, String> {
-    // Listening ports via netstat (Windows). Parse the local address column.
     let mut ports: Vec<u16> = Vec::new();
     if cfg!(target_os = "windows") {
         if let Ok(out) = Command::new("netstat").args(["-an"]).output() {
@@ -309,7 +271,6 @@ fn system_snapshot() -> Result<Snapshot, String> {
                 let l = line.trim();
                 if !l.starts_with("TCP") { continue; }
                 if !l.contains("LISTENING") { continue; }
-                // columns: TCP  0.0.0.0:135  0.0.0.0:0  LISTENING
                 if let Some(local) = l.split_whitespace().nth(1) {
                     if let Some(p) = local.rsplit(':').next() {
                         if let Ok(n) = p.parse::<u16>() { if !ports.contains(&n) { ports.push(n); } }
@@ -320,7 +281,6 @@ fn system_snapshot() -> Result<Snapshot, String> {
     }
     ports.sort_unstable();
 
-    // Processes via sysinfo.
     let mut sys = System::new_all();
     sys.refresh_all();
     let proc_count = sys.processes().len();
@@ -335,8 +295,6 @@ fn system_snapshot() -> Result<Snapshot, String> {
 
 #[tauri::command]
 fn net_info() -> Result<NetInfo, String> {
-    // Local IP: open a UDP socket "toward" a public address (no packets are
-    // actually sent by connect on UDP) and read the local address it picks.
     let local_ip = {
         use std::net::UdpSocket;
         UdpSocket::bind("0.0.0.0:0")
@@ -345,7 +303,6 @@ fn net_info() -> Result<NetInfo, String> {
             .unwrap_or_else(|_| "unavailable".into())
     };
 
-    // Gateway + interface from the routing table.
     let (gateway, iface) = if cfg!(target_os = "windows") {
         let out = Command::new("ipconfig").output().map_err(|e| e.to_string())?;
         let text = String::from_utf8_lossy(&out.stdout).to_string();
@@ -378,7 +335,6 @@ fn net_info() -> Result<NetInfo, String> {
     Ok(NetInfo { local_ip, gateway, iface })
 }
 
-// Real traceroute by shelling to the platform tool and returning raw lines.
 #[tauri::command]
 fn traceroute(host: String) -> Result<Vec<String>, String> {
     let clean = host.trim();
@@ -398,15 +354,9 @@ fn traceroute(host: String) -> Result<Vec<String>, String> {
     Ok(lines)
 }
 
-// Real local devices from the OS ARP table  -  hosts this machine has recently
-// communicated with. Reading the table is passive (no active sweep), so it
-// surfaces real neighbours without generating scan traffic.
 #[derive(Serialize)]
 struct Device { ip: String, mac: String, vendor: String, host: String }
 
-// A small built-in OUI table (MAC prefix → vendor). Not exhaustive  -  the full
-// IEEE registry is huge  -  but covers the common consumer/network vendors, so
-// most home devices resolve instead of showing blank.
 fn vendor_for(mac: &str) -> String {
     let p = mac.to_lowercase().replace('-', ":");
     let prefix: String = p.split(':').take(3).collect::<Vec<_>>().join(":");
@@ -431,9 +381,6 @@ fn vendor_for(mac: &str) -> String {
     name.to_string()
 }
 
-// Reverse DNS (PTR) isn't portably available in std, and shelling out per-IP
-// is slow and noisy. Rather than fake a hostname, we leave it blank and let
-// the vendor name carry the identification.
 fn reverse_dns(_ip: &str) -> String { String::new() }
 
 #[tauri::command]
@@ -462,10 +409,6 @@ fn arp_table() -> Result<Vec<Device>, String> {
     Ok(devices)
 }
 
-// Finder: reads real EXIF from an image (camera, settings, GPS, timestamps).
-// Remover: re-encodes the image so all metadata is dropped, saving a clean
-// copy next to the original. Both operate only on files the user points to.
-
 #[derive(Serialize)]
 struct MetaEntry { tag: String, value: String }
 
@@ -488,8 +431,6 @@ fn read_metadata_bytes(bytes: Vec<u8>) -> Result<Vec<MetaEntry>, String> {
     Ok(out)
 }
 
-// Strip metadata from dropped bytes, returning clean bytes the frontend can
-// offer as a download. Re-encodes the pixels so no EXIF survives.
 #[tauri::command]
 fn strip_metadata_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
     let img = image::load_from_memory(&bytes).map_err(|e| format!("couldn't read image: {e}"))?;
@@ -520,8 +461,6 @@ fn read_metadata(path: String) -> Result<Vec<MetaEntry>, String> {
 
 #[tauri::command]
 fn strip_metadata(path: String) -> Result<String, String> {
-    // Decode then re-encode: the image crate writes clean pixel data with no
-    // EXIF/metadata. Saves alongside the original as *-clean.<ext>.
     let img = image::open(&path).map_err(|e| format!("couldn't read image: {e}"))?;
     let p = std::path::Path::new(&path);
     let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "image".into());
@@ -530,10 +469,6 @@ fn strip_metadata(path: String) -> Result<String, String> {
     img.save(&out_path).map_err(|e| format!("couldn't save clean copy: {e}"))?;
     Ok(out_path.to_string_lossy().to_string())
 }
-
-// Real wireless info. On Windows, parses `netsh wlan show interfaces` for the
-// current connection and `show networks mode=bssid` for nearby SSIDs. Other
-// platforms return what they can or an honest "not supported".
 
 #[derive(Serialize)]
 struct WifiInfo {
@@ -580,7 +515,6 @@ fn wifi_info() -> Result<WifiInfo, String> {
         }
     };
 
-    // Nearby networks.
     let nets_raw = Command::new("netsh").args(["wlan", "show", "networks", "mode=bssid"]).output()
         .map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
     let mut networks = Vec::new();
@@ -602,10 +536,6 @@ fn wifi_info() -> Result<WifiInfo, String> {
 
     Ok(WifiInfo { connected, networks, supported: true })
 }
-
-// Reads real data from a local git repository by shelling to `git`. All
-// read-only  -  status, branch, ahead/behind, recent commits, tracked files.
-// Never commits, pushes, or changes anything.
 
 #[derive(Serialize)]
 struct GitInfo {
@@ -634,24 +564,20 @@ fn git(repo: &str, args: &[&str]) -> Result<String, String> {
 
 #[tauri::command]
 fn git_info(path: String) -> Result<GitInfo, String> {
-    // Confirm it's a repo.
     git(&path, &["rev-parse", "--is-inside-work-tree"])
         .map_err(|_| "That folder isn't a git repository.".to_string())?;
 
     let branch = git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default().trim().to_string();
 
-    // Ahead/behind vs upstream, if there is one.
     let (mut ahead, mut behind) = (0u32, 0u32);
     if let Ok(counts) = git(&path, &["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]) {
         let nums: Vec<u32> = counts.split_whitespace().filter_map(|n| n.parse().ok()).collect();
         if nums.len() == 2 { behind = nums[0]; ahead = nums[1]; }
     }
 
-    // Dirty working tree.
     let dirty: Vec<String> = git(&path, &["status", "--porcelain"]).unwrap_or_default()
         .lines().map(|l| l.get(3..).unwrap_or(l).to_string()).filter(|s| !s.is_empty()).take(50).collect();
 
-    // Recent commits: sha|subject|author|relative-date
     let log = git(&path, &["log", "-15", "--pretty=format:%h|%s|%an|%cr"]).unwrap_or_default();
     let commits: Vec<GitCommit> = log.lines().filter_map(|l| {
         let p: Vec<&str> = l.splitn(4, '|').collect();
@@ -659,7 +585,6 @@ fn git_info(path: String) -> Result<GitInfo, String> {
         else { None }
     }).collect();
 
-    // Tracked files with sizes.
     let tracked = git(&path, &["ls-files"]).unwrap_or_default();
     let files: Vec<GitFile> = tracked.lines().take(200).map(|rel| {
         let full = std::path::Path::new(&path).join(rel);
@@ -671,10 +596,6 @@ fn git_info(path: String) -> Result<GitInfo, String> {
 
     Ok(GitInfo { branch, ahead, behind, dirty, commits, files, remote })
 }
-
-// Walks a real directory (one level deep by default, or recursive) and returns
-// real file metadata. Text file bodies are read only for small files so search
-// can look inside them. No writes, ever  -  this is read-only.
 
 #[derive(Serialize)]
 struct IndexedFile {
@@ -716,7 +637,6 @@ fn walk_dir(dir: &std::path::Path, root: &std::path::Path, depth: usize, out: &m
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        // Read a body only for small text-like files, so search can look inside.
         let text_exts = ["md", "txt", "rs", "js", "jsx", "ts", "tsx", "py", "json", "toml", "css", "html", "csv", "log"];
         let body = if text_exts.contains(&ext.as_str()) && meta.len() < 200_000 {
             std::fs::read_to_string(&path).ok().map(|s| s.chars().take(20_000).collect())
@@ -756,9 +676,6 @@ fn index_folder(path: String, recursive: bool) -> Result<Vec<IndexedFile>, Strin
     Ok(out)
 }
 
-// Best-effort hostname for one IP. On Windows, nbtstat -A returns the NetBIOS
-// name table for a host; the "<00>  UNIQUE" entry is usually the machine name.
-// Many home devices (phones, IoT) don't answer  -  returns blank when unknown.
 #[tauri::command]
 fn resolve_hostname(ip: String) -> Result<String, String> {
     let ip = ip.trim().to_string();
@@ -769,7 +686,6 @@ fn resolve_hostname(ip: String) -> Result<String, String> {
             .map_err(|e| format!("nbtstat failed: {e}"))?;
         let text = String::from_utf8_lossy(&out.stdout);
         for line in text.lines() {
-            // Lines look like:  "    GIOS-PC        <00>  UNIQUE      Registered"
             if line.contains("<00>") && line.to_uppercase().contains("UNIQUE") {
                 let name = line.split_whitespace().next().unwrap_or("").trim().to_string();
                 if !name.is_empty() && name != "MAC" { return Ok(name); }
@@ -777,8 +693,6 @@ fn resolve_hostname(ip: String) -> Result<String, String> {
         }
         Ok(String::new())
     } else {
-        // Unix: try `getent hosts` (uses the system resolver, incl. mDNS on
-        // many setups). Blank if nothing resolves.
         let out = Command::new("getent").args(["hosts", &ip]).output();
         if let Ok(o) = out {
             let text = String::from_utf8_lossy(&o.stdout);
@@ -789,10 +703,6 @@ fn resolve_hostname(ip: String) -> Result<String, String> {
         Ok(String::new())
     }
 }
-
-// A separate key from the Anthropic one, stored the same way. If present, TTS
-// requests go to ElevenLabs for a natural voice; if absent, the frontend falls
-// back to the system (Windows) voice. Read-only network calls to ElevenLabs.
 
 fn eleven_key_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -832,8 +742,6 @@ fn has_eleven_key(app: tauri::AppHandle) -> bool {
     read_eleven_key(&app).is_some()
 }
 
-// Synthesize speech. Returns raw MP3 bytes the frontend plays. voice_id picks
-// which ElevenLabs voice; the frontend passes an elegant British one.
 #[tauri::command]
 async fn eleven_tts(app: tauri::AppHandle, text: String, voice_id: String) -> Result<Vec<u8>, String> {
     let key = read_eleven_key(&app).ok_or_else(|| "NO_ELEVEN_KEY".to_string())?;
@@ -857,9 +765,6 @@ async fn eleven_tts(app: tauri::AppHandle, text: String, voice_id: String) -> Re
     }
     Ok(bytes.to_vec())
 }
-
-// Real current conditions from Open-Meteo (free, no key). The frontend passes
-// coordinates; we return temp (F), a condition label, and the day's hi/lo.
 
 #[derive(Serialize)]
 struct Weather {
@@ -912,10 +817,6 @@ async fn get_weather(lat: f64, lon: f64) -> Result<Weather, String> {
     })
 }
 
-// Replaces the "reset on reload" gap. Settings, dashboard layout, projects,
-// files metadata, rules  -  anything the frontend wants to keep  -  is a JSON blob
-// written next to the app's data directory.
-
 #[tauri::command]
 fn load_state(app: tauri::AppHandle, key: String) -> Result<String, String> {
     let path = state_path(&app, &key)?;
@@ -943,15 +844,6 @@ fn state_path(app: &tauri::AppHandle, key: &str) -> Result<std::path::PathBuf, S
     Ok(dir.join("state").join(format!("{safe}.json")))
 }
 
-// The key lives in an environment variable read by the Rust process, never in
-// the frontend bundle. The frontend asks whether a key is present; it never
-// receives the value. Real model calls are proxied through call_model so the
-// key never crosses into JavaScript.
-
-// Opens an application, file, or URL using the OS's native "open" mechanism.
-// On Windows that's `cmd /C start`, macOS `open`, Linux `xdg-open`. A target
-// can be an app name on PATH, a full path, or a URL.
-
 #[tauri::command]
 fn launch_app(target: String) -> Result<(), String> {
     let t = target.trim().to_string();
@@ -959,8 +851,6 @@ fn launch_app(target: String) -> Result<(), String> {
         return Err("Nothing to launch.".into());
     }
 
-    // Store/UWP apps live in the protected WindowsApps folder and can't be run
-    // by their .exe path  -  Windows blocks it. Point the user at the real way.
     if t.to_lowercase().contains("windowsapps") {
         let hint = if t.to_lowercase().contains("spotify") {
             "  Try  spotify:  instead."
@@ -975,7 +865,6 @@ fn launch_app(target: String) -> Result<(), String> {
     }
 
     let result = if cfg!(target_os = "windows") {
-        // `start` needs an empty title arg first when the target is quoted
         Command::new("cmd").args(["/C", "start", "", &t]).spawn()
     } else if cfg!(target_os = "macos") {
         Command::new("open").arg(&t).spawn()
@@ -985,10 +874,6 @@ fn launch_app(target: String) -> Result<(), String> {
 
     result.map(|_| ()).map_err(|e| format!("Could not launch '{t}': {e}"))
 }
-
-// The key is stored in the app's private data directory so each person who
-// runs the app enters their own key once and it persists on their machine.
-// An ANTHROPIC_API_KEY env var still works as an override for development.
 
 fn key_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -1030,9 +915,6 @@ fn clear_api_key(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-// DEV ONLY  -  wipes the entire app data directory (keys + all state) so the next
-// launch behaves like a brand-new install. Remove this command and its button
-// before shipping the final build.
 #[tauri::command]
 fn factory_reset(app: tauri::AppHandle) -> Result<(), String> {
     let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -1040,7 +922,6 @@ fn factory_reset(app: tauri::AppHandle) -> Result<(), String> {
         for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
             let p = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            // Leave the webview cache alone; only remove Nexus's own files.
             if name == "EBWebView" { continue; }
             let _ = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
         }
@@ -1053,8 +934,6 @@ fn has_api_key(app: tauri::AppHandle) -> bool {
     read_saved_key(&app).is_some()
 }
 
-// Masked preview like "sk-ant-...a1b2" so the UI can show a key is set without
-// ever exposing the whole value.
 #[tauri::command]
 fn api_key_hint(app: tauri::AppHandle) -> Option<String> {
     let k = read_saved_key(&app)?;
@@ -1067,13 +946,6 @@ struct ModelCall {
     body: String, // the JSON request body assembled by the frontend
 }
 
-/// One client for the whole process, built once.
-///
-/// `Client::new()` per call throws away the connection pool, so every turn of an
-/// agent run paid for a fresh DNS lookup and TLS handshake before it could send
-/// a byte. Reusing the client keeps the connection to api.anthropic.com warm
-/// between turns. reqwest::Client is already an Arc internally  -  cloning is
-/// cheap and sharing it across tasks is the intended use.
 static HTTP: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 
 fn http() -> &'static reqwest::Client {
@@ -1111,8 +983,6 @@ async fn call_model(app: tauri::AppHandle, payload: ModelCall) -> Result<String,
 fn main() {
     let sys = System::new_all();
     tauri::Builder::default()
-        // Lets the agent raise a real Windows notification when it finishes or
-        // needs a human, so you can start a run and go do something else.
         .plugin(tauri_plugin_notification::init())
         .manage(Telemetry {
             sys: Mutex::new(sys),

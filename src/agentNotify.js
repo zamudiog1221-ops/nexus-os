@@ -1,13 +1,3 @@
-// NEXUS OS  -  agent notifications
-// Agent Mode's whole premise is that you start a job and walk away. That only
-// works if something comes and gets you. This module watches the engine for the
-// two moments that need you back  -  it finished, or it's stuck waiting on a
-// human  -  and raises them as a Windows notification, a chime, and an in-app
-// toast.
-//
-// It watches the engine singleton directly rather than living in a component,
-// so it keeps working while you're on another module, and does not care whether
-// Agent Mode is mounted.
 
 import * as engine from "./agentEngine.js";
 
@@ -18,12 +8,6 @@ function invoke(cmd, args) {
   const fn = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
   return fn(cmd, args);
 }
-
-// OS notification
-// Called through the plugin's invoke channel rather than @tauri-apps/plugin-
-// notification. Same thing underneath, but it needs no npm package, so a build
-// still succeeds if the Rust side hasn't been rebuilt yet  -  the call simply
-// rejects and we fall back to the in-app toast.
 
 let permission = null; // null = not asked yet, true/false once known
 
@@ -45,15 +29,8 @@ async function osNotify(title, body) {
     if (!(await ensurePermission())) return;
     await invoke("plugin:notification|notify", { options: { title, body } });
   } catch {
-    /* never let a failed notification disturb a run */
   }
 }
-
-// chime
-// Self-contained rather than reusing the UI sound engine, which is muted by
-// default behind a settings toggle. A UI click is decoration and should respect
-// that; "your agent needs you" is information and should not go silently
-// missing because effects happen to be off.
 
 let audio = null;
 
@@ -64,9 +41,6 @@ function chime(kind) {
     if (!audio) audio = new AC();
     if (audio.state === "suspended") audio.resume();
 
-    // Finish: a rising two-note major third, settled and final.
-    // Needs you: the same interval inverted and repeated  -  unresolved, so it
-    // reads as a question rather than an ending.
     const notes = kind === "help"
       ? [[880, 0], [660, 0.16], [880, 0.32]]
       : [[523, 0], [659, 0.12], [784, 0.24]];
@@ -86,13 +60,8 @@ function chime(kind) {
       osc.stop(t + 0.26);
     }
   } catch {
-    /* audio is a nicety, never a failure */
   }
 }
-
-// toast store
-// Same shape as the engine store: a module-level value plus subscribers, so any
-// component anywhere in the app can render the toast without prop drilling.
 
 let toast = null; // { id, kind, title, body } | null
 const listeners = new Set();
@@ -112,13 +81,9 @@ export function dismissToast() {
   setToast(null);
 }
 
-// the watcher
-
 let prev = engine.getState().status;
 let seq = 0;
 
-/// Cut a long agent summary down to something that fits a notification without
-/// being truncated mid-word, and strip the markdown the agent writes.
 function brief(text, max = 140) {
   const flat = String(text || "")
     .replace(/[#*`|]/g, "")

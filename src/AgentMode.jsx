@@ -1,12 +1,3 @@
-// NEXUS OS  -  Agent Mode
-// The surface for the engine in agentEngine.js. Two states, really: a box you
-// paste a goal into, and a live record of what the agent is doing to your
-// machine. The record matters more than the box  -  the whole premise is that
-// you are not here while it works, so when you come back the log has to answer
-// "what did it do" without you having to reconstruct it.
-//
-// This component owns no run state. It subscribes to the engine singleton, so
-// leaving Agent Mode and coming back mid-run shows the run still going.
 
 import React, { useState, useEffect, useRef } from "react";
 import {
@@ -15,15 +6,7 @@ import {
   Circle, Wrench, Clock, ArrowLeft, Gauge,
 } from "lucide-react";
 import * as engine from "./agentEngine.js";
-// The same renderer the assistant uses, so the agent's prose comes out with
-// real headings, bold and tables instead of raw ** and | characters.
 import { MsgText } from "./NexusCore.jsx";
-
-// plain language
-// Simple view exists because the feed below is a developer's view of a run:
-// commands, exit codes, turn counts. Someone who just wants the job done needs
-// one sentence about what is happening now and a checklist showing how far in
-// it is. Nothing here changes what the agent does  -  only what gets shown.
 
 const FRIENDLY_STATUS = {
   planning: "Working out what to do",
@@ -35,10 +18,6 @@ const FRIENDLY_STATUS = {
   error:    "Something went wrong",
 };
 
-/// One sentence describing what the agent is doing at this instant, taken from
-/// the most recent log entry that represents actual work. The model writes a
-/// `purpose` line for each command precisely so there is something human to
-/// show here; the fallbacks cover the case where it didn't.
 function plainNow(run) {
   if (run.status === "planning") return "Reading the goal and working out the steps";
   if (run.status === "waiting")  return "Waiting for you to do something on your screen";
@@ -58,7 +37,6 @@ function plainNow(run) {
   return "Getting started";
 }
 
-/// The step the agent is on: first unfinished item, or null when all are done.
 function currentStep(plan) {
   const i = plan.findIndex((s) => !s.done);
   return i === -1 ? null : i;
@@ -92,17 +70,13 @@ export default function AgentMode() {
     model: engine.DEFAULTS.model,
   });
   const [err, setErr] = useState(null);
-  // Simple by default: the person who most needs this screen is the one least
-  // likely to go looking for a setting to make it readable.
   const [details, setDetails] = useState(false);
-  // A past run being read back from its journal, or null for the normal view.
   const [viewing, setViewing] = useState(null);
   const feedRef = useRef(null);
 
   useEffect(() => engine.subscribe(setRun), []);
   useEffect(() => { engine.guardEnabled().then(setGuard); }, []);
 
-  // Follow the feed unless the user has scrolled up to read something.
   useEffect(() => {
     const el = feedRef.current;
     if (!el) return;
@@ -264,11 +238,6 @@ export default function AgentMode() {
   );
 }
 
-/* ---------------------------------------------------------- model picker */
-// Which brain runs the job. Sits on the start screen rather than buried in
-// settings because it is the single biggest lever on what a run costs, and the
-// right answer genuinely changes job to job.
-
 function ModelPicker({ value, onChange }) {
   const chosen = engine.MODELS.find((m) => m.id === value) || engine.MODELS[1];
 
@@ -295,11 +264,6 @@ function ModelPicker({ value, onChange }) {
     </div>
   );
 }
-
-/* --------------------------------------------------------------- history */
-// Every run has been journalled to disk since Agent Mode was built; until now
-// nothing read them back. A run you left alone for an hour is exactly the run
-// you want to reread later, so this lists them and reopens any one in full.
 
 function History({ onOpen }) {
   const [runs, setRuns] = useState(null); // null = still loading
@@ -351,8 +315,6 @@ function History({ onOpen }) {
   );
 }
 
-/// A past run reopened from its journal. Read-only, and deliberately the
-/// technical feed  -  if you are digging up an old run you want the detail.
 function PastRun({ summary, onBack }) {
   const [rows, setRows] = useState(null);
 
@@ -393,7 +355,6 @@ function firstLine(text) {
   return line.length > 96 ? `${line.slice(0, 96)}…` : line;
 }
 
-/// Relative for anything recent, absolute once it stops being "the other day".
 function when(ts) {
   if (!ts) return "";
   const diff = Date.now() - ts;
@@ -406,11 +367,6 @@ function when(ts) {
   if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
   return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
-
-/* ----------------------------------------------------------- simple view */
-// What someone sees who does not want to read a terminal: one line for what is
-// happening now, a checklist for how far along it is, and  -  when it matters  - 
-// the handoff card, which is the only thing on this screen they must act on.
 
 function SimpleView({ run, live, waiting, onRespond }) {
   const cur = currentStep(run.plan);
@@ -500,11 +456,6 @@ function SimpleView({ run, live, waiting, onRespond }) {
   );
 }
 
-/* --------------------------------------------------------------- handoff */
-// The run is parked in an unresolved promise while this is on screen. It stays
-// parked as long as it needs to  -  the budget clock is paused  -  so there is no
-// hurry and no penalty for wandering off mid-install.
-
 function Handoff({ req, onDone }) {
   const [reply, setReply] = useState("");
   const ref = useRef(null);
@@ -553,8 +504,6 @@ function Handoff({ req, onDone }) {
     </div>
   );
 }
-
-/* ---------------------------------------------------------------- status */
 
 function StatusBar({ run, onStop, onReset }) {
   const [now, setNow] = useState(Date.now());
@@ -606,8 +555,6 @@ function StatusBar({ run, onStop, onReset }) {
   );
 }
 
-/* ------------------------------------------------------------------ plan */
-
 function Plan({ plan }) {
   return (
     <div className="nx-agent-plan">
@@ -626,8 +573,6 @@ function Plan({ plan }) {
     </div>
   );
 }
-
-/* --------------------------------------------------------------- log row */
 
 function LogRow({ row }) {
   if (row.kind === "goal") {
@@ -743,8 +688,6 @@ function CommandRow({ row }) {
   );
 }
 
-/// Closing stats for a run. The cache line only appears when caching actually
-/// did something, so it reads as a result rather than a setting.
 function StatsRow({ row }) {
   const u = row.usage || {};
   const cost = engine.estimateCost(u, row.model);
