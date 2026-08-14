@@ -9597,13 +9597,19 @@ function Splash({ onDone }) {
       onClick={dismiss} role="button" tabIndex={0}
       aria-label={`${quote.text} — ${quote.who}. Continue to Nexus.`}>
       <div className="nx-splash-inner">
-        <span className="nx-splash-mark" />
-        <blockquote className="nx-splash-quote">{quote.text}</blockquote>
-        <p className="nx-splash-who">
+        <div className="nx-boot">
+          <span className="nx-boot-core" />
+          <span className="nx-boot-ring nx-boot-r1" />
+          <span className="nx-boot-ring nx-boot-r2" />
+          <span className="nx-boot-ring nx-boot-r3" />
+        </div>
+        <div className="nx-boot-word">NEXUS</div>
+        <blockquote className="nx-splash-quote nx-boot-fade">{quote.text}</blockquote>
+        <p className="nx-splash-who nx-boot-fade">
           {quote.who}{quote.work && <em>{quote.work}</em>}
         </p>
       </div>
-      <p className="nx-splash-hint">Click anywhere to continue</p>
+      <p className="nx-splash-hint nx-boot-fade">Click anywhere to continue</p>
     </div>
   );
 }
@@ -12349,6 +12355,25 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-splash-out{animation:nx-splash-out .62s cubic-bezier(.4,0,.6,1) forwards;}
 .nx-splash-inner{max-width:760px;display:flex;flex-direction:column;align-items:center;
   justify-content:center;}
+.nx-boot{position:relative;width:140px;height:140px;display:grid;place-items:center;}
+.nx-boot-core{width:14px;height:14px;border-radius:50%;background:var(--signal);
+  box-shadow:0 0 20px var(--signal),0 0 50px var(--glow);
+  animation:nx-boot-core 1s cubic-bezier(.2,.8,.2,1) both,nx-breathe 4.5s ease-in-out 1.6s infinite;}
+.nx-boot-ring{position:absolute;width:140px;height:140px;border-radius:50%;
+  border:1px solid var(--signal);opacity:0;
+  animation:nx-boot-ripple 1.9s cubic-bezier(.2,.7,.3,1) both;}
+.nx-boot-r1{animation-delay:.12s;}
+.nx-boot-r2{animation-delay:.38s;}
+.nx-boot-r3{animation-delay:.64s;}
+.nx-boot-word{margin-top:10px;font-size:clamp(26px,5vw,54px);font-weight:200;
+  letter-spacing:0.55em;text-indent:0.55em;color:var(--ice);
+  animation:nx-boot-word 1.1s .5s cubic-bezier(.2,.7,.3,1) both;}
+.nx-boot-fade{animation:nx-boot-in .8s 1.2s ease both !important;}
+@keyframes nx-boot-core{0%{transform:scale(0);opacity:0;}55%{opacity:1;}100%{transform:scale(1);opacity:1;}}
+@keyframes nx-boot-ripple{0%{transform:scale(.12);opacity:0;}22%{opacity:.5;}100%{transform:scale(2.6);opacity:0;}}
+@keyframes nx-boot-word{0%{opacity:0;letter-spacing:1.5em;filter:blur(7px);}
+  100%{opacity:1;letter-spacing:0.55em;filter:blur(0);}}
+@keyframes nx-boot-in{from{opacity:0;transform:translateY(7px);}to{opacity:1;transform:none;}}
 .nx-splash-mark{width:7px;height:7px;border-radius:50%;background:var(--signal);
   box-shadow:0 0 14px var(--signal),0 0 34px var(--glow);
   animation:nx-rise-soft .9s ease both,nx-breathe 4.5s ease-in-out 1s infinite;}
