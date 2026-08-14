@@ -9565,22 +9565,104 @@ const QUOTES = [
   { text: "The best revenge is not to be like your enemy.", who: "Marcus Aurelius", work: "Meditations" },
 ];
 
+const BOOT_LINES = [
+  "> nexus core online",
+  "> mounting modules ......... ok",
+  "> assistant model .......... ready",
+  "> voice interface .......... online",
+  "> secure channel ........... established",
+  "> welcome back.",
+];
+
 function Splash({ onDone }) {
   const [quote] = useState(() => QUOTES[Math.floor(Math.random() * QUOTES.length)]);
   const [leaving, setLeaving] = useState(false);
-  const timer = useRef(null);
+  const [step, setStep] = useState(0);
+  const [mounted, setMounted] = useState(false);
+  const [term, setTerm] = useState("");
+  const timers = useRef([]);
+  const audioRef = useRef(null);
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
 
-  useEffect(() => () => clearTimeout(timer.current), []);
+  const clearAll = () => { timers.current.forEach(clearTimeout); timers.current = []; };
+  const push = (fn, ms) => { const id = setTimeout(fn, ms); timers.current.push(id); return id; };
+
+  const ac = useCallback(() => {
+    try {
+      if (!audioRef.current) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        audioRef.current = new Ctx();
+      }
+      if (audioRef.current.state === "suspended") audioRef.current.resume().catch(() => {});
+      return audioRef.current;
+    } catch { return null; }
+  }, []);
+
+  const blip = useCallback((freq, dur, vol, type) => {
+    const c = ac(); if (!c) return;
+    try {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = type || "sine"; o.frequency.value = freq;
+      const t = c.currentTime;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(vol, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); g.connect(c.destination);
+      o.start(t); o.stop(t + dur + 0.02);
+    } catch { /* no-op */ }
+  }, [ac]);
+
+  const sweep = useCallback(() => {
+    const c = ac(); if (!c) return;
+    try {
+      const o = c.createOscillator(), g = c.createGain();
+      o.type = "sawtooth";
+      const t = c.currentTime;
+      o.frequency.setValueAtTime(110, t);
+      o.frequency.exponentialRampToValueAtTime(720, t + 0.5);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.05, t + 0.09);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+      o.connect(g); g.connect(c.destination);
+      o.start(t); o.stop(t + 0.62);
+    } catch { /* no-op */ }
+  }, [ac]);
 
   const dismiss = useCallback(() => {
     setLeaving((was) => {
       if (was) return was;
-      timer.current = setTimeout(() => doneRef.current(), 620);
+      blip(300, 0.2, 0.05, "triangle");
+      push(() => doneRef.current(), 620);
       return true;
     });
-  }, []);
+  }, [blip]);
+
+  useEffect(() => {
+    const r = requestAnimationFrame(() => setMounted(true));
+    push(() => { setStep(1); sweep(); }, 500);
+    push(() => setStep(2), 1000);
+    push(() => {
+      const full = BOOT_LINES.join("\n");
+      let i = 0;
+      const type = () => {
+        setTerm(full.slice(0, i));
+        const ch = full[i];
+        i += 1;
+        if (i <= full.length) {
+          if (ch === "\n") blip(760, 0.05, 0.03, "square");
+          push(type, ch === "\n" ? 95 : 14 + Math.random() * 20);
+        } else {
+          blip(523, 0.45, 0.05, "sine");
+          push(() => blip(784, 0.5, 0.045, "sine"), 90);
+          push(() => setStep(3), 340);
+        }
+      };
+      type();
+    }, 1080);
+    return () => { cancelAnimationFrame(r); clearAll(); };
+  }, [sweep, blip]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -9592,28 +9674,44 @@ function Splash({ onDone }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [dismiss]);
 
+  useEffect(() => () => { try { audioRef.current?.close(); } catch { /* no-op */ } }, []);
+
   return (
-    <div className={`nx-splash${leaving ? " nx-splash-out" : ""}`}
+    <div className={`nx-splash nx-boot-s${step}${mounted ? " nx-boot-live" : ""}${leaving ? " nx-splash-out" : ""}`}
       onClick={dismiss} role="button" tabIndex={0}
       aria-label={`${quote.text} — ${quote.who}. Continue to Nexus.`}>
       <div className="nx-splash-inner">
-        <div className="nx-boot">
-          <span className="nx-hud-glow" />
-          <span className="nx-hud-ring nx-hud-r1" />
-          <span className="nx-hud-ring nx-hud-r2" />
-          <span className="nx-hud-ring nx-hud-r3" />
-          <span className="nx-hud-ticks" />
-          <span className="nx-hud-sweep" />
-          <span className="nx-hud-reticle" />
-          <span className="nx-hud-core" />
+        <div className="nx-boot-frame">
+          <span className="nx-frame-c nx-frame-tl" /><span className="nx-frame-c nx-frame-tr" />
+          <span className="nx-frame-c nx-frame-bl" /><span className="nx-frame-c nx-frame-br" />
+          <div className="nx-boot-grid">
+            <div className="nx-boot-termcol">
+              <div className="nx-term-head">NEXUS CORE · v1.0</div>
+              <pre className="nx-term">{term}<span className="nx-term-cur" /></pre>
+            </div>
+            <div className="nx-boot-orbcol">
+              <div className="nx-boot">
+                <span className="nx-hud-glow" />
+                <span className="nx-hud-ring nx-hud-r1" />
+                <span className="nx-hud-ring nx-hud-r2" />
+                <span className="nx-hud-ring nx-hud-r3" />
+                <span className="nx-hud-ticks" />
+                <span className="nx-hud-sweep" />
+                <span className="nx-hud-reticle" />
+                <span className="nx-hud-core" />
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="nx-boot-word">NEXUS</div>
-        <blockquote className="nx-splash-quote nx-boot-fade">{quote.text}</blockquote>
-        <p className="nx-splash-who nx-boot-fade">
-          {quote.who}{quote.work && <em>{quote.work}</em>}
-        </p>
+        <div className="nx-boot-reveal">
+          <div className="nx-boot-word">NEXUS</div>
+          <blockquote className="nx-splash-quote">{quote.text}</blockquote>
+          <p className="nx-splash-who">
+            {quote.who}{quote.work && <em>{quote.work}</em>}
+          </p>
+        </div>
       </div>
-      <p className="nx-splash-hint nx-boot-fade">Click anywhere to continue</p>
+      <p className="nx-splash-hint">Click anywhere to continue</p>
     </div>
   );
 }
@@ -10119,14 +10217,7 @@ function VoiceOverlay({ ctx, settings }) {
   }, []);
 
   if (settings.schoolMode || !SPEECH) return null;
-  if (phase === "idle") {
-    if (!settings.wakeWord) return null;
-    return (
-      <div className="nx-wake" title="Say 'Nexus' to talk">
-        <span className="nx-wake-dot" />Say “Nexus”
-      </div>
-    );
-  }
+  if (phase === "idle") return null;
 
   return (
     <div className="nx-voice">
@@ -11373,12 +11464,6 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 @keyframes nx-fade{from{opacity:0;}to{opacity:1;}}
 
 /* voice assistant overlay */
-.nx-wake{position:fixed;right:22px;bottom:20px;z-index:170;pointer-events:none;
-  display:flex;align-items:center;gap:8px;padding:7px 13px;border-radius:20px;
-  border:1px solid var(--edge);background:rgba(4,6,12,0.6);backdrop-filter:blur(10px);
-  font-size:11.5px;color:var(--muted-2);letter-spacing:0.02em;opacity:0.75;}
-.nx-wake-dot{width:8px;height:8px;border-radius:50%;background:var(--signal);
-  box-shadow:0 0 10px var(--signal);animation:nx-pulse 2.4s ease-in-out infinite;}
 .nx-voice{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);z-index:180;
   pointer-events:none;animation:nx-voice-in .28s cubic-bezier(.2,.7,.3,1) both;}
 .nx-voice-card{display:flex;align-items:center;gap:16px;min-width:340px;max-width:560px;
@@ -12366,6 +12451,44 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-splash-out{animation:nx-splash-out .62s cubic-bezier(.4,0,.6,1) forwards;}
 .nx-splash-inner{max-width:760px;display:flex;flex-direction:column;align-items:center;
   justify-content:center;}
+.nx-boot-frame{position:relative;width:680px;max-width:88vw;height:296px;border-radius:14px;
+  border:1px solid var(--glow-soft);overflow:hidden;
+  background:linear-gradient(180deg,rgba(12,20,38,0.55),rgba(6,10,20,0.62));
+  box-shadow:0 0 44px var(--glow-faint),inset 0 0 70px rgba(120,160,255,0.03);
+  opacity:0;clip-path:inset(49.6% 50% 49.6% 50%);
+  transition:clip-path .55s cubic-bezier(.4,0,.2,1),opacity .3s;}
+.nx-boot-live .nx-boot-frame{opacity:1;clip-path:inset(49.6% 0 49.6% 0);}
+.nx-boot-live.nx-boot-s1 .nx-boot-frame,
+.nx-boot-live.nx-boot-s2 .nx-boot-frame,
+.nx-boot-live.nx-boot-s3 .nx-boot-frame{clip-path:inset(0 0 0 0);}
+.nx-frame-c{position:absolute;width:15px;height:15px;border:2px solid var(--signal);z-index:3;
+  box-shadow:0 0 8px var(--glow-soft);opacity:0;transition:opacity .4s .2s;}
+.nx-boot-s1 .nx-frame-c,.nx-boot-s2 .nx-frame-c,.nx-boot-s3 .nx-frame-c{opacity:1;}
+.nx-frame-tl{top:9px;left:9px;border-right:none;border-bottom:none;}
+.nx-frame-tr{top:9px;right:9px;border-left:none;border-bottom:none;}
+.nx-frame-bl{bottom:9px;left:9px;border-right:none;border-top:none;}
+.nx-frame-br{bottom:9px;right:9px;border-left:none;border-top:none;}
+.nx-boot-grid{display:grid;grid-template-columns:1fr 300px;height:100%;opacity:0;
+  transition:opacity .45s;}
+.nx-boot-s2 .nx-boot-grid,.nx-boot-s3 .nx-boot-grid{opacity:1;}
+.nx-boot-termcol{padding:22px 24px;display:flex;flex-direction:column;gap:14px;min-width:0;
+  border-right:1px solid var(--edge);text-align:left;}
+.nx-term-head{font-family:var(--mono);font-size:11px;letter-spacing:0.26em;text-transform:uppercase;
+  color:var(--signal);text-shadow:0 0 10px var(--glow-soft);}
+.nx-term{margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.8;color:var(--ice);
+  white-space:pre-wrap;word-break:break-word;text-shadow:0 0 8px var(--glow-faint);}
+.nx-term-cur{display:inline-block;width:8px;height:13px;margin-left:3px;vertical-align:-2px;
+  background:var(--signal);box-shadow:0 0 8px var(--signal);animation:nx-cur 1s steps(1) infinite;}
+.nx-boot-orbcol{display:grid;place-items:center;}
+.nx-boot-reveal{display:flex;flex-direction:column;align-items:center;opacity:0;
+  transform:translateY(12px);transition:opacity .7s,transform .7s;}
+.nx-boot-s3 .nx-boot-reveal{opacity:1;transform:none;}
+@keyframes nx-cur{0%,50%{opacity:1;}50.01%,100%{opacity:0;}}
+@media (max-width:720px){
+  .nx-boot-frame{height:260px;}
+  .nx-boot-grid{grid-template-columns:1fr;}
+  .nx-boot-orbcol{display:none;}
+}
 .nx-boot{position:relative;width:250px;height:250px;display:grid;place-items:center;}
 .nx-hud-glow{position:absolute;width:250px;height:250px;border-radius:50%;
   background:radial-gradient(circle,var(--glow),var(--glow-faint) 45%,transparent 70%);
@@ -12426,7 +12549,8 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   padding-left:12px;border-left:1px solid var(--edge);}
 .nx-splash-hint{position:absolute;bottom:6vh;left:0;right:0;font-family:var(--mono);
   font-size:9.5px;letter-spacing:0.24em;text-transform:uppercase;color:var(--muted-2);
-  animation:nx-hint 1.2s 1.5s ease both;}
+  opacity:0;transition:opacity .8s;}
+.nx-boot-s3 .nx-splash-hint{opacity:0.75;transition-delay:.5s;}
 .nx-asleep .nx-sidebar,.nx-asleep .nx-main{opacity:0;}
 .nx-woke .nx-sidebar,.nx-woke .nx-main{animation:nx-wake .75s .1s cubic-bezier(.2,.7,.3,1) both;}
 
