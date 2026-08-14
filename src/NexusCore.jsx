@@ -5354,6 +5354,100 @@ function FilePreview({ file, summary, onSummarize, onTag, onDropTag, onFav, ctx 
   );
 }
 
+// Read-only browser for saved voice notes (the recorder lives in School).
+function SavedNotesTab({ ctx }) {
+  const notes = ctx.voiceNotes || [];
+  const [q, setQ] = useState("");
+  const [sel, setSel] = useState(null);
+  const [audioSrc, setAudioSrc] = useState({});
+  const inv = (c, a) => (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke)?.(c, a);
+
+  const hits = notes.filter((n) => {
+    const s = q.trim().toLowerCase();
+    if (!s) return true;
+    return [n.title, n.topic, n.text, n.summary].some((x) => (x || "").toLowerCase().includes(s));
+  });
+  const note = notes.find((n) => n.id === sel) || hits[0] || null;
+
+  useEffect(() => {
+    if (note?.audioId && !audioSrc[note.id]) {
+      inv("load_state", { key: note.audioId })?.then((raw) => {
+        try { const d = JSON.parse(raw); if (d) setAudioSrc((m) => ({ ...m, [note.id]: d })); } catch { /* absent */ }
+      }).catch(() => {});
+    }
+  }, [note]);
+
+  if (!notes.length) {
+    return (
+      <div className="nx-empty">
+        <p className="nx-empty-title">No saved notes yet.</p>
+        <p className="nx-empty-body">Record a class in School → Voice notes and your saved notes show up here to read and search.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="nx-fsplit">
+      <div className="nx-flist">
+        <div className="nx-fsearch">
+          <Search size={16} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search saved notes — titles and contents" spellCheck={false} />
+          {q && <button className="nx-fsearch-x" onClick={() => setQ("")}><X size={13} /></button>}
+        </div>
+        {hits.map((n) => (
+          <button key={n.id} className={`nx-frow${(note && n.id === note.id) ? " nx-frow-on" : ""}`} onClick={() => setSel(n.id)}>
+            <Mic size={13} />
+            <span className="nx-frow-main">
+              <span className="nx-frow-name">{n.title}</span>
+              <span className="nx-frow-path">{n.topic || "Voice note"}{n.day ? ` · ${n.day}` : ""}</span>
+            </span>
+            <span className="nx-frow-size">{n.words || 0}w</span>
+          </button>
+        ))}
+        {!hits.length && <p className="nx-tool-note nx-tool-note-flush">No notes match "{q}".</p>}
+      </div>
+
+      <aside className="nx-fpane">
+        {note ? (
+          <div className="nx-fp">
+            <div className="nx-fp-head">
+              <span className="nx-fp-icon"><Mic size={16} /></span>
+              <div className="nx-fp-id">
+                <p className="nx-fp-name">{note.title}</p>
+                <p className="nx-fp-path">{note.topic || "Voice note"}{note.day ? ` · ${note.day}` : ""}</p>
+              </div>
+            </div>
+            {note.summary && <>
+              <div className="nx-out-head"><span>Summary</span></div>
+              <div className="nx-fp-sum-body"><MsgText text={note.summary} /></div>
+            </>}
+            {note.reminders?.length > 0 && <>
+              <div className="nx-out-head" style={{ marginTop: 14 }}><span>Reminders</span></div>
+              <div className="nx-rem-list">
+                {note.reminders.map((it, i) => (
+                  <div key={i} className="nx-tool-row nx-rem-row">
+                    <span className="nx-chip nx-chip-on nx-rem-badge"><Check size={11} />Added</span>
+                    <span className="nx-rem-text">{it.text}{it.due && <i> · {it.due}</i>}</span>
+                  </div>
+                ))}
+              </div>
+            </>}
+            {audioSrc[note.id] && <>
+              <div className="nx-out-head" style={{ marginTop: 14 }}><span>Recording</span></div>
+              <audio src={audioSrc[note.id]} controls className="nx-note-audio" />
+            </>}
+            <div className="nx-out-head" style={{ marginTop: 14 }}><span>Transcript</span></div>
+            <pre className="nx-fp-pre">{note.text}</pre>
+            <button className="nx-chip" style={{ marginTop: 10 }} onClick={() => ctx.goSchoolTab("notes")}>
+              <Mic size={11} />Open in Voice Notes
+            </button>
+          </div>
+        ) : <p className="nx-blank">Select a note</p>}
+      </aside>
+    </div>
+  );
+}
+
 function FilesView({ ctx }) {
   const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
   const inv = (cmd, args) => (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke)?.(cmd, args);
@@ -5364,6 +5458,7 @@ function FilesView({ ctx }) {
   const [finding, setFinding] = useState(false);
   const [findErr, setFindErr] = useState(null);
   const [recent, setRecent] = usePersistent("files-recent", []); // [{name,path}]
+  const [pinned, setPinned] = usePersistent("files-pinned", []); // [{name,path}] favorites
 
   const [folder, setFolder] = useState("");            // current folder (browse)
   const [files, setFiles] = useState([]);
@@ -5420,6 +5515,27 @@ function FilesView({ ctx }) {
     catch (e) { setIdxErr(String(e?.message || e)); setIndexing(false); }
   };
 
+  const isPinned = (path) => pinned.some((p) => p.path === path);
+  const togglePin = (f) => setPinned((prev) => prev.some((p) => p.path === f.path)
+    ? prev.filter((p) => p.path !== f.path)
+    : [{ name: f.name, path: f.path }, ...prev].slice(0, 12));
+
+  // A folder card used across the finder grid (results, pinned, recent).
+  const FolderCard = (f) => (
+    <div key={f.path} className="nx-fcard" onClick={() => openFolder(f.path, f.name)}>
+      <div className="nx-fcard-top">
+        <Folder size={18} />
+        <button className={`nx-fcard-pin${isPinned(f.path) ? " on" : ""}`}
+          title={isPinned(f.path) ? "Unpin" : "Pin"}
+          onClick={(e) => { e.stopPropagation(); togglePin(f); }}>
+          <Star size={13} />
+        </button>
+      </div>
+      <p className="nx-fcard-name">{f.name}</p>
+      <p className="nx-fcard-path">{f.parent || f.path}</p>
+    </div>
+  );
+
   const parsed = useMemo(() => parseQuery(q), [q]);
   const TYPES = { all: null, docs: ["md", "txt", "csv", "pdf", "doc", "docx", "rtf"],
     code: ["py", "jsx", "js", "ts", "tsx", "cpp", "c", "rs", "go", "json", "html", "css"],
@@ -5471,7 +5587,7 @@ function FilesView({ ctx }) {
     </div>
   );
   if (tab === "notes") {
-    return <div className="nx-mod nx-mod-wide">{TabBar}<SchoolNotes ctx={ctx} /></div>;
+    return <div className="nx-mod nx-mod-wide">{TabBar}<SavedNotesTab ctx={ctx} /></div>;
   }
 
   if (!isDesktop) {
@@ -5489,58 +5605,51 @@ function FilesView({ ctx }) {
 
   // ---- FIND MODE: type a folder name, pick a folder ----
   if (mode === "find") {
+    const searching = fquery.trim().length >= 2;
     return (
       <div className="nx-mod nx-mod-wide">
         {TabBar}
-        <div className="nx-ff">
-          <div className="nx-ff-search">
-            <Search size={18} />
-            <input autoFocus value={fquery} onChange={(e) => setFquery(e.target.value)}
-              placeholder="Type a folder name — like nexus-os, documents, projects…" spellCheck={false} />
-            {fquery && <button className="nx-fsearch-x" onClick={() => setFquery("")}><X size={14} /></button>}
-          </div>
-
-          <div className="nx-ff-quick">
-            {["Desktop", "Documents", "Downloads"].map((n) => (
-              <button key={n} className="nx-chip" onClick={() => openByName(n)}><Folder size={11} />{n}</button>
-            ))}
-          </div>
-
-          {indexing && <p className="nx-msg-busy"><Loader2 size={13} className="nx-spin" />Opening folder…</p>}
-          {idxErr && <p className="nx-out-err">{idxErr}</p>}
-
-          {!fquery.trim() && recent.length > 0 && (
-            <>
-              <p className="nx-ff-label">Recent</p>
-              <div className="nx-ff-list">
-                {recent.map((r) => (
-                  <button key={r.path} className="nx-ff-row" onClick={() => openFolder(r.path, r.name)}>
-                    <Folder size={15} /><span className="nx-ff-name">{r.name}</span>
-                    <span className="nx-ff-path">{r.path}</span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-
-          {fquery.trim().length >= 2 && (
-            <>
-              <p className="nx-ff-label">{finding ? "Searching…" : `${folderHits.length} folder${folderHits.length !== 1 ? "s" : ""}`}</p>
-              {findErr && <p className="nx-out-err">{findErr}</p>}
-              <div className="nx-ff-list">
-                {folderHits.map((h) => (
-                  <button key={h.path} className="nx-ff-row" onClick={() => openFolder(h.path, h.name)}>
-                    <Folder size={15} /><span className="nx-ff-name">{h.name}</span>
-                    <span className="nx-ff-path">{h.parent}</span>
-                  </button>
-                ))}
-                {!finding && !folderHits.length && (
-                  <p className="nx-tool-note nx-tool-note-flush">No folders match. Try a shorter or different name.</p>
-                )}
-              </div>
-            </>
-          )}
+        <div className="nx-ff-search nx-ff-search-wide">
+          <Search size={18} />
+          <input autoFocus value={fquery} onChange={(e) => setFquery(e.target.value)}
+            placeholder="Type a folder name — like nexus-os, documents, projects…" spellCheck={false} />
+          {fquery && <button className="nx-fsearch-x" onClick={() => setFquery("")}><X size={14} /></button>}
         </div>
+
+        <div className="nx-ff-quick">
+          {["Desktop", "Documents", "Downloads"].map((n) => (
+            <button key={n} className="nx-chip" onClick={() => openByName(n)}><Folder size={11} />{n}</button>
+          ))}
+        </div>
+
+        {indexing && <p className="nx-msg-busy"><Loader2 size={13} className="nx-spin" />Opening folder…</p>}
+        {idxErr && <p className="nx-out-err">{idxErr}</p>}
+
+        {searching ? (
+          <>
+            <p className="nx-ff-label">{finding ? "Searching…" : `${folderHits.length} folder${folderHits.length !== 1 ? "s" : ""}`}</p>
+            {findErr && <p className="nx-out-err">{findErr}</p>}
+            {!finding && !folderHits.length
+              ? <p className="nx-tool-note nx-tool-note-flush">No folders match. Try a shorter or different name.</p>
+              : <div className="nx-fcards">{folderHits.map(FolderCard)}</div>}
+          </>
+        ) : (
+          <>
+            {pinned.length > 0 && <>
+              <p className="nx-ff-label"><Star size={11} /> Pinned</p>
+              <div className="nx-fcards">{pinned.map(FolderCard)}</div>
+            </>}
+            {recent.length > 0 && <>
+              <p className="nx-ff-label">Recent</p>
+              <div className="nx-fcards">{recent.map(FolderCard)}</div>
+            </>}
+            {!pinned.length && !recent.length && (
+              <p className="nx-tool-note nx-tool-note-flush" style={{ marginTop: 18 }}>
+                Type a folder name above to find it, or use a quick link. Pin folders with the star to keep them here.
+              </p>
+            )}
+          </>
+        )}
       </div>
     );
   }
@@ -12368,6 +12477,20 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   text-overflow:ellipsis;white-space:nowrap;flex:1;}
 .nx-ff-crumb{display:flex;align-items:center;gap:7px;color:var(--muted-2);font-size:12px;
   font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.nx-ff-search-wide{max-width:none;margin-top:4px;}
+.nx-ff-label{display:flex;align-items:center;gap:6px;}
+.nx-fcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px;margin-bottom:6px;}
+.nx-fcard{position:relative;padding:15px 16px;border-radius:14px;border:1px solid var(--edge);
+  background:rgba(2,4,9,0.42);cursor:pointer;transition:all .13s;min-width:0;}
+.nx-fcard:hover{border-color:var(--signal);background:var(--glow-faint);transform:translateY(-1px);}
+.nx-fcard-top{display:flex;align-items:center;justify-content:space-between;color:var(--signal);margin-bottom:10px;}
+.nx-fcard-pin{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border-radius:8px;
+  color:var(--muted-2);border:none;background:transparent;cursor:pointer;transition:all .12s;}
+.nx-fcard-pin:hover{color:var(--text);background:var(--glass);}
+.nx-fcard-pin.on{color:var(--gold,#e9c46a);}
+.nx-fcard-name{color:var(--text);font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.nx-fcard-path{color:var(--muted-2);font-size:11px;font-family:var(--mono);margin-top:3px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .nx-fsearch input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--ice);
   font:inherit;font-size:14px;}
 .nx-fsearch-x{display:grid;place-items:center;width:22px;height:22px;border-radius:6px;
