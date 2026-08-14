@@ -9276,7 +9276,7 @@ const DEFAULT_SETTINGS = {
   motion: true, splash: true, ask: true,
   sound: true, volume: 1, hover: false, hidden: [],
   schoolMode: false, schoolKey: "Alt+S",
-  voiceKey: "t", voiceSpeak: true, voiceGender: "female", wakeWord: true,
+  voiceKey: "t", voiceSpeak: true, voiceGender: "female", wakeWord: false,
   userName: "", greetVoice: true, launchCount: 0, tutorialSeen: false,
 };
 
@@ -10007,13 +10007,14 @@ function VoiceOverlay({ ctx, settings }) {
 
   const stopWake = () => {
     wakeActiveRef.current = false;
-    try { wakeRef.current?.stop(); } catch { /* no-op */ }
+    try { wakeRef.current?.abort(); } catch { /* no-op */ }
     wakeRef.current = null;
   };
 
   const startWake = () => {
-    if (!SPEECH || wakeActiveRef.current || heldRef.current || autoListeningRef.current) return;
+    if (!SPEECH || wakeActiveRef.current || heldRef.current || autoListeningRef.current || phase !== "idle") return;
     if (!settings.wakeWord || schoolRef.current) return;
+    stopWake();
     wakeActiveRef.current = true;
     const rec = new SPEECH();
     rec.continuous = true; rec.interimResults = true; rec.lang = "en-US"; rec.maxAlternatives = 1;
@@ -10036,8 +10037,14 @@ function VoiceOverlay({ ctx, settings }) {
 
   useEffect(() => {
     if (!SPEECH) return;
-    if (phase === "idle" && settings.wakeWord && !settings.schoolMode) startWake();
-    else stopWake();
+    try {
+      if (phase === "idle" && settings.wakeWord && !settings.schoolMode
+          && !heldRef.current && !autoListeningRef.current) {
+        const id = setTimeout(() => { try { startWake(); } catch { /* no-op */ } }, 350);
+        return () => { clearTimeout(id); stopWake(); };
+      }
+      stopWake();
+    } catch { /* never let voice setup crash the app */ }
     return stopWake;
   }, [phase, settings.wakeWord, settings.schoolMode]);
 
