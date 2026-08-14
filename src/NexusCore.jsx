@@ -669,6 +669,15 @@ const ASSISTANT_TOOLS = [
     },
   },
   {
+    name: "find_folders",
+    description: "Find folders on the user's computer whose name contains a search term. Use when they ask where a folder/project is, or to locate something by partial name (e.g. 'find my nexus folder').",
+    input_schema: {
+      type: "object",
+      properties: { query: { type: "string", description: "Part of the folder name, e.g. 'nexus' or 'projects'." } },
+      required: ["query"],
+    },
+  },
+  {
     name: "read_file",
     description: "Read the text content of a file in the user's indexed folder so you can answer questions about it or summarize it. Match by file name. Text files only (code, markdown, txt, etc.).",
     input_schema: {
@@ -946,6 +955,14 @@ async function runAssistantTool(name, input, ctx) {
       return `Files${q ? ` matching "${input.query}"` : ""} (${filtered.length}): ` +
         filtered.slice(0, 25).map((f) => `${f.name} (${f.size})`).join(", ") +
         (filtered.length > 25 ? `, and ${filtered.length - 25} more.` : ".");
+    }
+    if (name === "find_folders") {
+      if (!isDesktop) return "Finding folders needs the desktop app.";
+      try {
+        const hits = await inv("find_folders", { query: input.query });
+        if (!hits?.length) return `No folders matching "${input.query}".`;
+        return `Folders matching "${input.query}": ` + hits.slice(0, 10).map((h) => `${h.name} (${h.path})`).join("; ") + ".";
+      } catch (e) { return `Folder search failed: ${e}.`; }
     }
     if (name === "read_file") {
       if (!isDesktop) return "Reading files needs the desktop app.";
@@ -5358,6 +5375,7 @@ function FilesView({ ctx }) {
   const [typeFilter, setTypeFilter] = useState("all");
   const [sel, setSel] = useState(null);
   const [summaries, setSummaries] = useState({});
+  const [tab, setTab] = useState("files"); // "files" | "notes"
   const abortRef = useRef(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -5388,6 +5406,7 @@ function FilesView({ ctx }) {
       setFolder(path);
       setMode("browse");
       setQ(""); setTypeFilter("all"); setSel(withMeta[0]?.id || null);
+      ctx.setFilesFolder?.(path); // share with the assistant's file tools
       setRecent((prev) => [{ name: name || path.split(/[\\/]/).filter(Boolean).pop(), path },
         ...prev.filter((r) => r.path !== path)].slice(0, 6));
     } catch (e) { setIdxErr(String(e?.message || e)); }
@@ -5445,9 +5464,20 @@ function FilesView({ ctx }) {
     }
   };
 
+  const TabBar = (
+    <div className="nx-tabs">
+      <button className={`nx-tab${tab === "files" ? " nx-tab-on" : ""}`} onClick={() => setTab("files")}><Files size={14} />Files</button>
+      <button className={`nx-tab${tab === "notes" ? " nx-tab-on" : ""}`} onClick={() => setTab("notes")}><Mic size={14} />Voice notes</button>
+    </div>
+  );
+  if (tab === "notes") {
+    return <div className="nx-mod nx-mod-wide">{TabBar}<SchoolNotes ctx={ctx} /></div>;
+  }
+
   if (!isDesktop) {
     return (
       <div className="nx-mod">
+        {TabBar}
         <div className="nx-first">
           <span className="nx-first-mark"><Folder size={22} /></span>
           <h2>Files works in the desktop app.</h2>
@@ -5460,7 +5490,8 @@ function FilesView({ ctx }) {
   // ---- FIND MODE: type a folder name, pick a folder ----
   if (mode === "find") {
     return (
-      <div className="nx-mod">
+      <div className="nx-mod nx-mod-wide">
+        {TabBar}
         <div className="nx-ff">
           <div className="nx-ff-search">
             <Search size={18} />
@@ -5518,6 +5549,7 @@ function FilesView({ ctx }) {
   const folderName = folder.split(/[\\/]/).filter(Boolean).pop() || folder;
   return (
     <div className="nx-mod nx-mod-wide">
+      {TabBar}
       <div className="nx-tool-row nx-fbar">
         <button className="nx-chip" onClick={() => setMode("find")}><ChevronLeft size={13} />Folders</button>
         <span className="nx-ff-crumb"><Folder size={12} />{folder}</span>
@@ -10836,7 +10868,9 @@ export default function NexusCore() {
   // Lifted so the assistant can read them too (same persistent keys the
   // modules use, so state stays in sync).
   const [projects] = usePersistent("projects", []);
-  const [filesFolder] = usePersistent("files-folder", "");
+  // filesFolder gets a setter so the Files module can share whichever folder is
+  // open with the assistant's list_files / read_file tools.
+  const [filesFolder, setFilesFolder] = usePersistent("files-folder", "");
 
   const ctx = useMemo(() => ({
     t, online, demo, go, toast, active, settings, setSettings,
@@ -10845,7 +10879,7 @@ export default function NexusCore() {
     schoolTab, setSchoolTab, goSchoolTab: (tabId) => { setSchoolTab(tabId); go("school"); },
     workouts, setWorkouts, logWorkout,
     launchApps, setLaunchApps,
-    projects, filesFolder,
+    projects, filesFolder, setFilesFolder,
     replayTutorial: () => setShowTutorial(true),
     openAbout: () => setAboutOpen(true),
     chat, setChat,
@@ -10853,7 +10887,7 @@ export default function NexusCore() {
       reminders, addReminder, toggleReminder, removeReminder, updateReminder, voiceNotes, setVoiceNotes,
       schoolTab, setSchoolTab,
       workouts, setWorkouts, logWorkout,
-      launchApps, setLaunchApps, projects, filesFolder, chat, setChat]);
+      launchApps, setLaunchApps, projects, filesFolder, setFilesFolder, chat, setChat]);
 
   // Keep-alive: every module you open stays mounted (just hidden) so its state
   // - sub-tabs, half-typed drafts, scroll, searches - is exactly where you left
@@ -12314,8 +12348,8 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   border:1px solid var(--edge);background:rgba(4,6,12,0.5);color:var(--muted-2);
   transition:border-color .2s,box-shadow .2s;margin-bottom:14px;}
 .nx-fsearch:focus-within{border-color:var(--glow);box-shadow:0 0 30px var(--glow-faint);}
-/* Folder finder */
-.nx-ff{max-width:760px;margin:8px auto 0;}
+/* Folder finder — centered like a launcher so the page doesn't feel empty. */
+.nx-ff{max-width:720px;width:100%;margin:auto;padding-bottom:6vh;}
 .nx-ff-search{display:flex;align-items:center;gap:13px;padding:16px 20px;border-radius:16px;
   border:1px solid var(--edge);background:rgba(4,6,12,0.55);color:var(--muted-2);
   transition:border-color .2s,box-shadow .2s;}
