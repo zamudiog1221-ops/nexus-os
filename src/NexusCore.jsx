@@ -5320,7 +5320,7 @@ function FilePreview({ file, summary, onSummarize, onTag, onDropTag, onFav, ctx 
       {/* Voice Notes are in-app artifacts with no disk file, so "Open" would try
           to launch a bogus path. Show a jump-to-module link for them instead. */}
       {file.source === "Voice Notes"
-        ? <button className="nx-chip" onClick={() => ctx.go("school")}>
+        ? <button className="nx-chip" onClick={() => ctx.goSchoolTab("notes")}>
             <Mic size={11} />Open in Voice Notes
           </button>
         : <button className="nx-chip" onClick={async () => {
@@ -6634,6 +6634,14 @@ function SchoolView({ ctx }) {
   const schoolMode = ctx.settings?.schoolMode;
   const tabs = SCHOOL_TABS.filter((x) => !(schoolMode && x.ai));
   const [tab, setTab] = useState(tabs[0].id);
+  // Another module can request a specific sub-tab (e.g. Files -> Open in Voice
+  // Notes). Apply it once, then clear the request.
+  useEffect(() => {
+    if (ctx.schoolTab && tabs.some((x) => x.id === ctx.schoolTab)) {
+      setTab(ctx.schoolTab);
+      ctx.setSchoolTab?.(null);
+    }
+  }, [ctx.schoolTab]);
   // If the active tab got hidden by school mode, fall back to the first.
   const active = tabs.find((x) => x.id === tab) || tabs[0];
   const Body = active.body;
@@ -10777,6 +10785,9 @@ export default function NexusCore() {
   // Voice notes live at the shell so Voice Notes and Files share one live copy
   // (each module stays mounted, so a per-module copy would go stale).
   const [voiceNotes, setVoiceNotes] = usePersistent("voice-notes", []);
+  // Lets another module ask School to open a specific sub-tab (e.g. Files ->
+  // "Open in Voice Notes"). SchoolView applies it, then clears it.
+  const [schoolTab, setSchoolTab] = useState(null);
   const addReminder = useCallback((text, due) => {
     const item = { id: Date.now() + Math.random(), text: String(text).slice(0, 200),
       due: due || null, done: false, at: Date.now() };
@@ -10815,6 +10826,7 @@ export default function NexusCore() {
     t, online, demo, go, toast, active, settings, setSettings,
     reminders, addReminder, toggleReminder, removeReminder, updateReminder,
     voiceNotes, setVoiceNotes,
+    schoolTab, setSchoolTab, goSchoolTab: (tabId) => { setSchoolTab(tabId); go("school"); },
     workouts, setWorkouts, logWorkout,
     launchApps, setLaunchApps,
     projects, filesFolder,
@@ -10823,6 +10835,7 @@ export default function NexusCore() {
     chat, setChat,
   }), [t, online, demo, go, toast, active, settings,
       reminders, addReminder, toggleReminder, removeReminder, updateReminder, voiceNotes, setVoiceNotes,
+      schoolTab, setSchoolTab,
       workouts, setWorkouts, logWorkout,
       launchApps, setLaunchApps, projects, filesFolder, chat, setChat]);
 
