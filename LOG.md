@@ -171,6 +171,24 @@ Assistant compatibility now covers: reminders/calendar, fitness, settings, quick
 
 Next: test the reflow + new assistant tools; then Automation/Voice-Notes tools if wanted, or back to the Ubuntu VM (still stuck at EFI boot) / Linux port.
 
+2026-08-13 — Files rebuild, dashboard reflow, code scrub, working rules (session)
+
+Did:
+
+Dashboard: settled on the fixed orbit for good (grids can't match the look - see DECISIONS). Rearrange is now a reflow: drag a widget, it keeps its size and the others shift to fill within the size tier; no gaps.
+Fixed wrong dashboard values: real round-trip latency (pings the gateway), hide temp when the OS exposes no sensor, and Kb/s throughput so light traffic doesn't read 0.
+Rebuilt the Files module from scratch: type a folder name -> find/open matching folders (new Rust find_folders command), then plain-search inside (no C:\ paths or tag: syntax). Full-width folder-card grid with Pinned + Recent, quick-access chips, type filters. Added a Voice notes tab that reads saved notes (read-only browser). Wired the assistant: find_folders tool + list_files/read_file now follow the open folder.
+Fixed keep-alive staleness: lifted voice-notes to a shared shell store so Voice Notes and Files see the same live list.
+Voice assistant: auto-listens for the answer after it asks a question (no key hold); reply bubble stays until speech finishes.
+Added CLAUDE.md working rules (keep assistant compatible, no AI comments in code, log sparingly).
+Scrubbed 876 full-line comments from all source files - code only now, eslint directives and terse trailing notes kept. ~77 remain in NexusCore (protected string content + a few the safe pass skipped).
+
+Learned / noted:
+
+The orbit-vs-grid tension is permanently resolved and documented; stop revisiting.
+Keep-alive tabs mean per-module copies of shared state go stale - lift shared data to the shell.
+Comment-stripping by backtick heuristic is imperfect (backticks in strings/comments desync it) but safe - it under-removes rather than corrupting strings.
+
 Template
 ## YYYY-MM-DD — Short title (~Nh)
 
