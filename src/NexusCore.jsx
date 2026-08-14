@@ -9565,6 +9565,13 @@ const QUOTES = [
   { text: "The best revenge is not to be like your enemy.", who: "Marcus Aurelius", work: "Meditations" },
 ];
 
+const BOOT_ARCS = [
+  [0, 0, 0, 1], [70, 0, 0, 1], [0, 70, 0, 1], [55, 30, 20, 1],
+  [-45, 35, -15, 0.86], [72, 55, 45, 0.86], [25, 72, 0, 0.72],
+  [-30, -50, 25, 0.72], [60, -35, -30, 0.6], [82, 18, 60, 0.6],
+  [40, 40, -40, 0.5], [-20, 20, 70, 0.5],
+];
+
 function Splash({ onDone }) {
   const [quote] = useState(() => QUOTES[Math.floor(Math.random() * QUOTES.length)]);
   const [leaving, setLeaving] = useState(false);
@@ -9598,10 +9605,16 @@ function Splash({ onDone }) {
       aria-label={`${quote.text} — ${quote.who}. Continue to Nexus.`}>
       <div className="nx-splash-inner">
         <div className="nx-boot">
+          <span className="nx-boot-glow" />
+          <div className="nx-boot-bloom">
+            <div className="nx-boot-orb">
+              {BOOT_ARCS.map((a, i) => (
+                <span key={i} className="nx-boot-arc"
+                  style={{ transform: `rotateX(${a[0]}deg) rotateY(${a[1]}deg) rotateZ(${a[2]}deg) scale(${a[3]})` }} />
+              ))}
+            </div>
+          </div>
           <span className="nx-boot-core" />
-          <span className="nx-boot-ring nx-boot-r1" />
-          <span className="nx-boot-ring nx-boot-r2" />
-          <span className="nx-boot-ring nx-boot-r3" />
         </div>
         <div className="nx-boot-word">NEXUS</div>
         <blockquote className="nx-splash-quote nx-boot-fade">{quote.text}</blockquote>
@@ -12355,22 +12368,31 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-splash-out{animation:nx-splash-out .62s cubic-bezier(.4,0,.6,1) forwards;}
 .nx-splash-inner{max-width:760px;display:flex;flex-direction:column;align-items:center;
   justify-content:center;}
-.nx-boot{position:relative;width:140px;height:140px;display:grid;place-items:center;}
-.nx-boot-core{width:14px;height:14px;border-radius:50%;background:var(--signal);
-  box-shadow:0 0 20px var(--signal),0 0 50px var(--glow);
-  animation:nx-boot-core 1s cubic-bezier(.2,.8,.2,1) both,nx-breathe 4.5s ease-in-out 1.6s infinite;}
-.nx-boot-ring{position:absolute;width:140px;height:140px;border-radius:50%;
-  border:1px solid var(--signal);opacity:0;
-  animation:nx-boot-ripple 1.9s cubic-bezier(.2,.7,.3,1) both;}
-.nx-boot-r1{animation-delay:.12s;}
-.nx-boot-r2{animation-delay:.38s;}
-.nx-boot-r3{animation-delay:.64s;}
-.nx-boot-word{margin-top:10px;font-size:clamp(26px,5vw,54px);font-weight:200;
-  letter-spacing:0.55em;text-indent:0.55em;color:var(--ice);
-  animation:nx-boot-word 1.1s .5s cubic-bezier(.2,.7,.3,1) both;}
-.nx-boot-fade{animation:nx-boot-in .8s 1.2s ease both !important;}
-@keyframes nx-boot-core{0%{transform:scale(0);opacity:0;}55%{opacity:1;}100%{transform:scale(1);opacity:1;}}
-@keyframes nx-boot-ripple{0%{transform:scale(.12);opacity:0;}22%{opacity:.5;}100%{transform:scale(2.6);opacity:0;}}
+.nx-boot{position:relative;width:230px;height:230px;display:grid;place-items:center;
+  perspective:640px;}
+.nx-boot-bloom{position:absolute;width:190px;height:190px;transform-style:preserve-3d;
+  animation:nx-boot-bloom 1.2s cubic-bezier(.2,.8,.2,1) both;}
+.nx-boot-orb{position:absolute;inset:0;transform-style:preserve-3d;
+  animation:nx-boot-spin 16s linear infinite;}
+.nx-boot-arc{position:absolute;inset:0;border-radius:50%;
+  border:1.5px solid rgba(255,168,52,0.55);
+  box-shadow:0 0 8px rgba(255,150,30,0.35),inset 0 0 12px rgba(255,150,30,0.18);}
+.nx-boot-glow{position:absolute;width:230px;height:230px;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,150,30,0.5),rgba(255,120,20,0.12) 42%,transparent 68%);
+  filter:blur(4px);animation:nx-boot-glow 1.4s ease both,nx-breathe 4s ease-in-out 1.4s infinite;}
+.nx-boot-core{position:absolute;width:16px;height:16px;border-radius:50%;
+  background:radial-gradient(circle,#fff7e6,#ffb545 55%,#ff8c1a);
+  box-shadow:0 0 22px #ffb545,0 0 60px #ff8c1a,0 0 120px rgba(255,140,25,0.6);
+  animation:nx-boot-core 1s cubic-bezier(.2,.8,.2,1) both;}
+.nx-boot-word{margin-top:22px;font-size:clamp(26px,5vw,54px);font-weight:200;
+  letter-spacing:0.55em;text-indent:0.55em;color:#ffd9a0;
+  text-shadow:0 0 20px rgba(255,150,30,0.4);
+  animation:nx-boot-word 1.1s .55s cubic-bezier(.2,.7,.3,1) both;}
+.nx-boot-fade{animation:nx-boot-in .8s 1.35s ease both !important;}
+@keyframes nx-boot-core{0%{transform:scale(0);opacity:0;}45%{opacity:1;}100%{transform:scale(1);opacity:1;}}
+@keyframes nx-boot-glow{0%{transform:scale(0);opacity:0;}60%{opacity:1;}100%{transform:scale(1);opacity:1;}}
+@keyframes nx-boot-bloom{0%{transform:scale(0);opacity:0;}55%{opacity:1;}100%{transform:scale(1);opacity:1;}}
+@keyframes nx-boot-spin{from{transform:rotateY(0deg) rotateX(8deg);}to{transform:rotateY(360deg) rotateX(8deg);}}
 @keyframes nx-boot-word{0%{opacity:0;letter-spacing:1.5em;filter:blur(7px);}
   100%{opacity:1;letter-spacing:0.55em;filter:blur(0);}}
 @keyframes nx-boot-in{from{opacity:0;transform:translateY(7px);}to{opacity:1;transform:none;}}
