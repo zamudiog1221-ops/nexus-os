@@ -148,6 +148,80 @@ fn dirs_home() -> String {
         .unwrap_or_else(|_| ".".into())
 }
 
+// Find folders whose name contains the query, so the user can jump into a
+// project by typing part of its name instead of a full path. Searches the home
+// tree (deep) plus the drive root (shallow), skipping heavy/system dirs, with a
+// hard budget so it stays fast.
+#[derive(Serialize)]
+struct FolderHit {
+    name: String,
+    path: String,
+    parent: String,
+}
+
+#[tauri::command]
+fn find_folders(query: String) -> Result<Vec<FolderHit>, String> {
+    let q = query.trim().to_lowercase();
+    if q.len() < 2 {
+        return Ok(vec![]);
+    }
+    let home = dirs_home();
+    let home_path = std::path::PathBuf::from(&home);
+    // (dir, remaining depth). Home gets a deep budget; the drive root a shallow one.
+    let mut stack: Vec<(std::path::PathBuf, usize)> = vec![(home_path.clone(), 6)];
+    if let Some(root) = home_path.ancestors().last() {
+        if root != home_path {
+            stack.push((root.to_path_buf(), 2));
+        }
+    }
+    let skip = [
+        "appdata", "node_modules", ".git", ".cache", ".npm", ".rustup", ".cargo",
+        "target", "$recycle.bin", "windows", "program files", "program files (x86)",
+        "programdata", "system volume information", ".vscode", ".idea",
+    ];
+    let mut hits: Vec<FolderHit> = Vec::new();
+    let mut budget = 60_000usize;
+
+    while let Some((dir, depth)) = stack.pop() {
+        if budget == 0 || hits.len() >= 80 {
+            break;
+        }
+        budget -= 1;
+        let rd = match std::fs::read_dir(&dir) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            let lname = name.to_lowercase();
+            if skip.iter().any(|s| lname == *s) {
+                continue;
+            }
+            if lname.contains(&q) {
+                hits.push(FolderHit {
+                    name: name.clone(),
+                    path: path.to_string_lossy().to_string(),
+                    parent: dir.to_string_lossy().to_string(),
+                });
+                if hits.len() >= 80 {
+                    break;
+                }
+            }
+            if depth > 1 {
+                stack.push((path, depth - 1));
+            }
+        }
+    }
+    // Shorter paths first (closer to home / more likely what they meant).
+    hits.sort_by(|a, b| a.path.len().cmp(&b.path.len()).then_with(|| a.name.cmp(&b.name)));
+    hits.dedup_by(|a, b| a.path == b.path);
+    Ok(hits)
+}
+
 // Replaces MockNet.resolve(). Uses the system resolver.
 
 #[tauri::command]
@@ -1057,6 +1131,7 @@ fn main() {
             arp_table,
             resolve_hostname,
             index_folder,
+            find_folders,
             git_info,
             wifi_info,
             read_metadata,

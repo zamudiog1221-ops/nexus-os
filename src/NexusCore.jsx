@@ -12,7 +12,7 @@ import {
   Mic, Filter, BookOpen, ListOrdered, Repeat, Upload,
   Calculator, CircuitBoard, Zap,
   Library, Bookmark, ExternalLink,
-  Minus, Unlock, Info, Server, Code2, Boxes, Bot, Hand, Play
+  Minus, Unlock, Info, Server, Code2, Boxes, Bot, Hand, Play, ChevronLeft
 } from "lucide-react";
 import AgentMode from "./AgentMode.jsx";
 // Watching the agent for "finished" / "needs you" starts on import  -  the
@@ -5339,95 +5339,89 @@ function FilePreview({ file, summary, onSummarize, onTag, onDropTag, onFav, ctx 
 
 function FilesView({ ctx }) {
   const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
+  const inv = (cmd, args) => (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke)?.(cmd, args);
+
+  const [mode, setMode] = useState("find");            // "find" | "browse"
+  const [fquery, setFquery] = useState("");            // folder-name query
+  const [folderHits, setFolderHits] = useState([]);
+  const [finding, setFinding] = useState(false);
+  const [findErr, setFindErr] = useState(null);
+  const [recent, setRecent] = usePersistent("files-recent", []); // [{name,path}]
+
+  const [folder, setFolder] = useState("");            // current folder (browse)
   const [files, setFiles] = useState([]);
-  const [q, setQ] = useState("");
+  const [indexing, setIndexing] = useState(false);
+  const [idxErr, setIdxErr] = useState(null);
+
+  const [q, setQ] = useState("");                      // in-folder search (plain words)
   const [sort, setSort] = useState("recent");
-  const [onlyFav, setOnlyFav] = useState(false);
+  const [typeFilter, setTypeFilter] = useState("all");
   const [sel, setSel] = useState(null);
   const [summaries, setSummaries] = useState({});
-  const [indexing, setIndexing] = useState(false);
-  const [folder, setFolder] = usePersistent("files-folder", "");
-  const voiceNotes = ctx.voiceNotes || []; // shared live store, folded in as artifacts
-  const [reindex, setReindex] = useState(false); // show the folder-index screen on demand
-  const [pathInput, setPathInput] = useState("");
-  const [idxErr, setIdxErr] = useState(null);
   const abortRef = useRef(null);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const indexFolder = async (path, recursive = true) => {
-    if (!isDesktop) { setIdxErr("Folder indexing works in the desktop app."); return; }
-    const target = (path || "").trim();
-    if (!target) { setIdxErr("Enter a folder path first."); return; }
+  // Debounced folder search: type part of a name, get matching folders.
+  useEffect(() => {
+    if (!isDesktop) return;
+    const term = fquery.trim();
+    if (term.length < 2) { setFolderHits([]); setFinding(false); return; }
+    setFinding(true); setFindErr(null);
+    const id = setTimeout(async () => {
+      try {
+        const hits = await inv("find_folders", { query: term });
+        setFolderHits(hits || []);
+      } catch (e) { setFindErr(String(e?.message || e)); setFolderHits([]); }
+      finally { setFinding(false); }
+    }, 300);
+    return () => clearTimeout(id);
+  }, [fquery, isDesktop]);
+
+  const openFolder = async (path, name) => {
+    if (!isDesktop || !path) return;
     setIndexing(true); setIdxErr(null);
     try {
-      const inv = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
-      const found = await inv("index_folder", { path: target, recursive });
-      // Add the UI-only fields the list/sort expect.
-      const withMeta = found.map((f, i) => ({ ...f, order: i, fav: false, seed: false }));
+      const found = await inv("index_folder", { path, recursive: true });
+      const withMeta = (found || []).map((f, i) => ({ ...f, order: i, fav: false }));
       setFiles(withMeta);
-      setFolder(target);
-      setReindex(false);
-      setSel(withMeta[0]?.id || null);
-    } catch (e) {
-      setIdxErr(String(e?.message || e));
-    } finally {
-      setIndexing(false);
-    }
+      setFolder(path);
+      setMode("browse");
+      setQ(""); setTypeFilter("all"); setSel(withMeta[0]?.id || null);
+      setRecent((prev) => [{ name: name || path.split(/[\\/]/).filter(Boolean).pop(), path },
+        ...prev.filter((r) => r.path !== path)].slice(0, 6));
+    } catch (e) { setIdxErr(String(e?.message || e)); }
+    finally { setIndexing(false); }
   };
 
-  // Re-index the saved folder on open.
-  useEffect(() => {
-    if (isDesktop && folder && !files.length) indexFolder(folder, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Quick-access: jump into the closest folder with this name.
+  const openByName = async (name) => {
+    setIndexing(true);
+    try { const hits = await inv("find_folders", { query: name }); if (hits && hits[0]) await openFolder(hits[0].path, hits[0].name); else { setIdxErr(`Couldn't find a "${name}" folder.`); setIndexing(false); } }
+    catch (e) { setIdxErr(String(e?.message || e)); setIndexing(false); }
+  };
 
   const parsed = useMemo(() => parseQuery(q), [q]);
-
-  // Voice Notes shown as artifacts alongside indexed files, with a source badge.
-  const noteItems = useMemo(() => voiceNotes.map((n, i) => ({
-    id: "vn-" + n.id,
-    name: (n.title || "Voice note") + ".txt",
-    path: "Voice Notes" + (n.topic ? " / " + n.topic : ""),
-    type: "txt",
-    size: `${n.words || 0}w`,
-    when: n.day || "note",
-    tags: n.topic ? [n.topic] : [],
-    body: (n.summary ? "SUMMARY\n" + n.summary + "\n\n" : "") + "TRANSCRIPT\n" + (n.text || ""),
-    order: -1000 - i, // keep them at the top under "recent"
-    fav: false, seed: false, source: "Voice Notes",
-  })), [voiceNotes]);
-
-  const items = useMemo(() => [...noteItems, ...files], [noteItems, files]);
-
+  const TYPES = { all: null, docs: ["md", "txt", "csv", "pdf", "doc", "docx", "rtf"],
+    code: ["py", "jsx", "js", "ts", "tsx", "cpp", "c", "rs", "go", "json", "html", "css"],
+    images: ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp"] };
   const hits = useMemo(() => {
+    const allow = TYPES[typeFilter];
     const out = [];
-    for (const f of items) {
-      if (onlyFav && !f.fav) continue;
+    for (const f of files) {
+      if (allow && !allow.includes((f.type || "").toLowerCase())) continue;
       const where = matchFile(f, parsed);
       if (where) out.push({ ...f, where });
     }
-    out.sort((a, b) =>
-      sort === "name" ? a.name.localeCompare(b.name)
-      : sort === "size" ? sizeBytes(b.size) - sizeBytes(a.size)
-      : a.order - b.order);
+    out.sort((a, b) => sort === "name" ? a.name.localeCompare(b.name)
+      : sort === "size" ? sizeBytes(b.size) - sizeBytes(a.size) : a.order - b.order);
     return out;
-  }, [items, parsed, sort, onlyFav]);
+  }, [files, parsed, sort, typeFilter]);
 
-  const file = items.find((f) => f.id === sel) || null;
+  const file = files.find((f) => f.id === sel) || null;
+  useEffect(() => { if (!file && hits.length) setSel(hits[0].id); }, [files, hits, file]);
 
-  useEffect(() => {
-    if (!file && hits.length) setSel(hits[0].id);
-    if (!items.length) setSel(null);
-  }, [items, file, hits]);
-
-  const tagCounts = useMemo(() => {
-    const m = new Map();
-    for (const f of items) for (const t of f.tags) m.set(t, (m.get(t) || 0) + 1);
-    return [...m.entries()].sort((a, b) => b[1] - a[1]);
-  }, [items]);
-
-  const patch = (id, fn) => setFiles((prev) => prev.map((f) => (f.id === id ? fn(f) : f)));
+  const patch = (id, fn) => setFiles((p) => p.map((f) => (f.id === id ? fn(f) : f)));
 
   const summarize = async (f) => {
     if (!TEXTY.has(f.type) || !f.body) {
@@ -5440,7 +5434,7 @@ function FilesView({ ctx }) {
     abortRef.current = ac;
     try {
       const text = await askClaude({
-        system: "Summarize the file the user pastes. Two or three sentences, plain prose, no headers. Say what it is and what matters in it. If it records a decision, lead with the decision.",
+        system: "Summarize the file the user pastes. Two or three sentences, plain prose, no headers. Say what it is and what matters in it.",
         messages: [{ role: "user", content: `File: ${f.path}/${f.name}\n\n${f.body}` }],
         signal: ac.signal,
       });
@@ -5451,68 +5445,102 @@ function FilesView({ ctx }) {
     }
   };
 
-  if (reindex || !items.length) {
+  if (!isDesktop) {
     return (
       <div className="nx-mod">
         <div className="nx-first">
           <span className="nx-first-mark"><Folder size={22} /></span>
-          <h2>{reindex ? "Index a folder" : "No folder indexed."}</h2>
-          <p>
-            Point Nexus at a folder and it will index what's inside — searchable by
-            name, path, and by what text files actually say. Read-only; nothing is changed.
-          </p>
-          <div className="nx-idx-row">
-            <input className="nx-inline nx-inline-wide" value={pathInput}
-              onChange={(e) => setPathInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && indexFolder(pathInput)}
-              placeholder={isDesktop ? "Paste a folder path — e.g. C:\\Users\\zamud\\Documents" : "Desktop app only"}
-              spellCheck={false} disabled={!isDesktop} />
-            <button className="nx-cta" onClick={() => indexFolder(pathInput)} disabled={indexing || !isDesktop}>
-              {indexing ? "Indexing…" : "Index"} <ArrowRight size={15} />
-            </button>
-          </div>
-          {idxErr && <p className="nx-out-err" style={{ marginTop: 10 }}>{idxErr}</p>}
-          {reindex && items.length > 0 && (
-            <button className="nx-chip" style={{ marginTop: 12 }} onClick={() => setReindex(false)}>Cancel</button>
-          )}
-          <p className="nx-first-alt">
-            Tip: in File Explorer, click the address bar to see the full path, then copy it.
-            Your Voice Notes always show here too.
-          </p>
+          <h2>Files works in the desktop app.</h2>
+          <p>The browser preview can't reach your filesystem.</p>
         </div>
       </div>
     );
   }
 
+  // ---- FIND MODE: type a folder name, pick a folder ----
+  if (mode === "find") {
+    return (
+      <div className="nx-mod">
+        <div className="nx-ff">
+          <div className="nx-ff-search">
+            <Search size={18} />
+            <input autoFocus value={fquery} onChange={(e) => setFquery(e.target.value)}
+              placeholder="Type a folder name — like nexus-os, documents, projects…" spellCheck={false} />
+            {fquery && <button className="nx-fsearch-x" onClick={() => setFquery("")}><X size={14} /></button>}
+          </div>
+
+          <div className="nx-ff-quick">
+            {["Desktop", "Documents", "Downloads"].map((n) => (
+              <button key={n} className="nx-chip" onClick={() => openByName(n)}><Folder size={11} />{n}</button>
+            ))}
+          </div>
+
+          {indexing && <p className="nx-msg-busy"><Loader2 size={13} className="nx-spin" />Opening folder…</p>}
+          {idxErr && <p className="nx-out-err">{idxErr}</p>}
+
+          {!fquery.trim() && recent.length > 0 && (
+            <>
+              <p className="nx-ff-label">Recent</p>
+              <div className="nx-ff-list">
+                {recent.map((r) => (
+                  <button key={r.path} className="nx-ff-row" onClick={() => openFolder(r.path, r.name)}>
+                    <Folder size={15} /><span className="nx-ff-name">{r.name}</span>
+                    <span className="nx-ff-path">{r.path}</span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {fquery.trim().length >= 2 && (
+            <>
+              <p className="nx-ff-label">{finding ? "Searching…" : `${folderHits.length} folder${folderHits.length !== 1 ? "s" : ""}`}</p>
+              {findErr && <p className="nx-out-err">{findErr}</p>}
+              <div className="nx-ff-list">
+                {folderHits.map((h) => (
+                  <button key={h.path} className="nx-ff-row" onClick={() => openFolder(h.path, h.name)}>
+                    <Folder size={15} /><span className="nx-ff-name">{h.name}</span>
+                    <span className="nx-ff-path">{h.parent}</span>
+                  </button>
+                ))}
+                {!finding && !folderHits.length && (
+                  <p className="nx-tool-note nx-tool-note-flush">No folders match. Try a shorter or different name.</p>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ---- BROWSE MODE: inside a folder, plain search ----
+  const folderName = folder.split(/[\\/]/).filter(Boolean).pop() || folder;
   return (
     <div className="nx-mod nx-mod-wide">
+      <div className="nx-tool-row nx-fbar">
+        <button className="nx-chip" onClick={() => setMode("find")}><ChevronLeft size={13} />Folders</button>
+        <span className="nx-ff-crumb"><Folder size={12} />{folder}</span>
+      </div>
+
       <div className="nx-fsearch">
         <Search size={16} />
-        <input value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Search names, paths, tags, and contents" spellCheck={false} />
+        <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
+          placeholder={`Search in ${folderName} — names and contents`} spellCheck={false} />
         {q && <button className="nx-fsearch-x" onClick={() => setQ("")}><X size={13} /></button>}
       </div>
 
       <div className="nx-tool-row nx-fbar">
-        <button className={`nx-chip${onlyFav ? " nx-chip-on" : ""}`} onClick={() => setOnlyFav((v) => !v)}>
-          <Star size={11} />Starred
-        </button>
+        {Object.keys(TYPES).map((k) => (
+          <button key={k} className={`nx-chip${typeFilter === k ? " nx-chip-on" : ""}`}
+            onClick={() => setTypeFilter(k)}>{k[0].toUpperCase() + k.slice(1)}</button>
+        ))}
         <span className="nx-fbar-div" />
         {Object.entries(F_SORTS).map(([k, label]) => (
           <button key={k} className={`nx-chip${sort === k ? " nx-chip-on" : ""}`}
             onClick={() => setSort(k)}>{label}</button>
         ))}
-        <span className="nx-fbar-div" />
-        {tagCounts.slice(0, 6).map(([t, n]) => (
-          <button key={t} className="nx-chip" onClick={() => setQ(`tag:${t}`)}>
-            <Tag size={10} />{t}<b className="nx-tag-n">{n}</b>
-          </button>
-        ))}
-        <span className="nx-fcount">{hits.length} of {items.length}</span>
-        <button className="nx-chip" onClick={() => { setPathInput(folder); setReindex(true); }}
-          title="Index a different folder">
-          <Folder size={11} />{folder ? "Change folder" : "Index a folder"}
-        </button>
+        <span className="nx-fcount">{hits.length} of {files.length}</span>
       </div>
 
       <div className="nx-fsplit">
@@ -5520,32 +5548,20 @@ function FilesView({ ctx }) {
           {hits.length === 0 && (
             <div className="nx-empty">
               <p className="nx-empty-title">Nothing matches.</p>
-              <p className="nx-empty-body">
-                Free text searches names, paths, tags and contents. You can also
-                narrow with <code>tag:cyber</code>, <code>type:md</code>, or <code>in:School</code>.
-              </p>
+              <p className="nx-empty-body">Type part of a file name, or something the file says inside.</p>
             </div>
           )}
           {hits.map((f) => {
             const Icon = FILE_ICON[f.type] || FileText;
             return (
-              <button key={f.id} className={`nx-frow${f.id === sel ? " nx-frow-on" : ""}`}
-                onClick={() => setSel(f.id)}>
+              <button key={f.id} className={`nx-frow${f.id === sel ? " nx-frow-on" : ""}`} onClick={() => setSel(f.id)}>
                 <Icon size={13} />
                 <span className="nx-frow-main">
-                  <span className="nx-frow-name">
-                    {f.name}
-                    {f.fav && <Star size={9} className="nx-frow-star" />}
-                  </span>
+                  <span className="nx-frow-name">{f.name}{f.fav && <Star size={9} className="nx-frow-star" />}</span>
                   <span className="nx-frow-path">{f.path}</span>
-                </span>
-                <span className="nx-frow-tags">
-                  {f.source && <i className="nx-frow-src"><Mic size={9} />{f.source}</i>}
-                  {f.tags.slice(0, 2).map((t) => <i key={t}>{t}</i>)}
                 </span>
                 {f.where === "content" && <span className="nx-frow-hit">in contents</span>}
                 <span className="nx-frow-size">{f.size}</span>
-                <span className="nx-frow-when">{f.when}</span>
               </button>
             );
           })}
@@ -12298,6 +12314,26 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   border:1px solid var(--edge);background:rgba(4,6,12,0.5);color:var(--muted-2);
   transition:border-color .2s,box-shadow .2s;margin-bottom:14px;}
 .nx-fsearch:focus-within{border-color:var(--glow);box-shadow:0 0 30px var(--glow-faint);}
+/* Folder finder */
+.nx-ff{max-width:760px;margin:8px auto 0;}
+.nx-ff-search{display:flex;align-items:center;gap:13px;padding:16px 20px;border-radius:16px;
+  border:1px solid var(--edge);background:rgba(4,6,12,0.55);color:var(--muted-2);
+  transition:border-color .2s,box-shadow .2s;}
+.nx-ff-search:focus-within{border-color:var(--glow);box-shadow:0 0 34px var(--glow-faint);}
+.nx-ff-search input{flex:1;background:none;border:none;outline:none;color:var(--text);font-size:16px;}
+.nx-ff-quick{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;}
+.nx-ff-label{font-size:11px;text-transform:uppercase;letter-spacing:0.09em;color:var(--muted-2);
+  margin:18px 0 8px 2px;}
+.nx-ff-list{display:flex;flex-direction:column;gap:6px;}
+.nx-ff-row{display:flex;align-items:center;gap:11px;padding:11px 14px;border-radius:12px;
+  border:1px solid var(--edge);background:rgba(2,4,9,0.4);color:var(--muted);cursor:pointer;
+  text-align:left;transition:all .12s;}
+.nx-ff-row:hover{border-color:var(--signal);background:var(--glow-faint);}
+.nx-ff-name{color:var(--text);font-size:13.5px;font-weight:500;flex:none;}
+.nx-ff-path{color:var(--muted-2);font-size:11.5px;font-family:var(--mono);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap;flex:1;}
+.nx-ff-crumb{display:flex;align-items:center;gap:7px;color:var(--muted-2);font-size:12px;
+  font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .nx-fsearch input{flex:1;min-width:0;background:none;border:none;outline:none;color:var(--ice);
   font:inherit;font-size:14px;}
 .nx-fsearch-x{display:grid;place-items:center;width:22px;height:22px;border-radius:6px;
