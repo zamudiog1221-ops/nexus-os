@@ -12,7 +12,7 @@ import {
   Mic, Filter, BookOpen, ListOrdered, Repeat, Upload,
   Calculator, CircuitBoard, Zap,
   Library, Bookmark, ExternalLink,
-  Minus, Unlock, Info, Server, Code2, Boxes, Bot, Hand, Play, ChevronLeft
+  Minus, Unlock, Info, Server, Code2, Boxes, Bot, Hand, Play, ChevronLeft, Music, FolderOpen
 } from "lucide-react";
 import AgentMode from "./AgentMode.jsx";
 import { subscribeToast, dismissToast as dismissAgentToast } from "./agentNotify.js";
@@ -5893,7 +5893,65 @@ function SchoolNotes({ ctx }) {
   const noteAudioRef = useRef(null);
   const [audio, setAudio] = useState(null); // pending draft's { url, dataUrl, segments } until saved
   const [audioSrc, setAudioSrc] = useState({}); // noteId -> playable src, resolved lazily
+  const [dropDrag, setDropDrag] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const dragCountRef = useRef(0);
   const inv = (cmd, args) => (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke)?.(cmd, args);
+
+  const loadDroppedAudio = async (file) => {
+    if (!file || !file.type.startsWith("audio/")) {
+      ctx.toast("Drop an audio file — mp3, wav, m4a, webm, etc.");
+      return;
+    }
+    const CAP = 250 * 1024 * 1024;
+    const url = URL.createObjectURL(file);
+    if (file.size > CAP) {
+      setAudio({ url, dataUrl: null, segments: [] });
+      ctx.toast("Audio loaded (too large to persist — session only)");
+    } else {
+      const fr = new FileReader();
+      fr.onload = () => setAudio({ url, dataUrl: fr.result, segments: [] });
+      fr.onerror = () => setAudio({ url, dataUrl: null, segments: [] });
+      fr.readAsDataURL(file);
+    }
+
+    // auto-transcribe with Whisper if OpenAI key is saved
+    let oKey = null;
+    try {
+      const raw = await inv("load_state", { key: "openai-key" });
+      oKey = JSON.parse(raw);
+    } catch { /* no key saved */ }
+
+    if (oKey) {
+      setTranscribing(true);
+      try {
+        const isGroq = oKey.startsWith("gsk_");
+        const endpoint = isGroq
+          ? "https://api.groq.com/openai/v1/audio/transcriptions"
+          : "https://api.openai.com/v1/audio/transcriptions";
+        const model = isGroq ? "whisper-large-v3" : "whisper-1";
+        const fd = new FormData();
+        fd.append("file", file, file.name);
+        fd.append("model", model);
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${oKey}` },
+          body: fd,
+        });
+        if (!res.ok) throw new Error(`Whisper returned ${res.status}`);
+        const { text } = await res.json();
+        bufRef.current = text;
+        setFinalText(text);
+        ctx.toast("Transcript ready — review and save.");
+      } catch (e) {
+        ctx.toast(`Transcription failed: ${e.message}`);
+      } finally {
+        setTranscribing(false);
+      }
+    } else {
+      ctx.toast(`Loaded: ${file.name} — add a free Groq key in Settings → AI & Voice to auto-transcribe`);
+    }
+  };
 
   const audioSrcRef = useRef({});
   audioSrcRef.current = audioSrc;
@@ -6143,7 +6201,19 @@ function SchoolNotes({ ctx }) {
 
   return (
     <div className="nx-tool">
-      <div className="nx-rec">
+      <div
+        className={`nx-rec${dropDrag ? " nx-rec-drop-hot" : ""}`}
+        onDragEnter={(e) => { e.preventDefault(); dragCountRef.current++; setDropDrag(true); }}
+        onDragOver={(e) => e.preventDefault()}
+        onDragLeave={() => { dragCountRef.current--; if (dragCountRef.current === 0) setDropDrag(false); }}
+        onDrop={(e) => { e.preventDefault(); dragCountRef.current = 0; setDropDrag(false); loadDroppedAudio(e.dataTransfer.files?.[0]); }}
+      >
+        {dropDrag && (
+          <div className="nx-rec-drop-overlay">
+            <Music size={32} />
+            <p>Drop audio file to attach</p>
+          </div>
+        )}
         <div className="nx-rec-head">
           {live
             ? <button className="nx-rec-btn nx-rec-live" onClick={stop}>
@@ -6194,6 +6264,30 @@ function SchoolNotes({ ctx }) {
           Filtering is applied to what gets saved. The raw transcript is kept
           underneath in case the filter eats something it shouldn't.
         </p>
+
+        {audio?.url && (
+          <div className="nx-tool-row nx-rec-audio-preview">
+            <Music size={13} />
+            <audio src={audio.url} controls className="nx-note-audio" style={{ flex: 1 }} />
+            <button className="nx-chip" onClick={() => { try { URL.revokeObjectURL(audio.url); } catch { /* fine */ } setAudio(null); }}>
+              <X size={11} />Remove
+            </button>
+          </div>
+        )}
+
+        {transcribing && (
+          <div className="nx-rec-transcribing">
+            <div className="nx-rec-transcribing-bar" />
+            <span>Transcribing audio…</span>
+          </div>
+        )}
+
+        {!audio && !transcribing && (
+          <div className={`nx-rec-drop-zone${dropDrag ? " nx-rec-drop-zone-hot" : ""}`}>
+            <Music size={16} />
+            <span>Drop an audio file to attach</span>
+          </div>
+        )}
       </div>
 
       {notes.length === 0 ? (
@@ -8584,6 +8678,67 @@ function ElevenPanel({ ctx }) {
 
 function ElevenPanelEnd() {}
 
+function OpenAIKeyPanel({ ctx }) {
+  const isDesktop = typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
+  const invoke = (cmd, args) => (window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke)(cmd, args);
+  const [has, setHas] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [val, setVal] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(() => {
+    if (!isDesktop) return;
+    invoke("load_state", { key: "openai-key" }).then((raw) => {
+      try { setHas(!!JSON.parse(raw)); } catch { setHas(false); }
+    }).catch(() => setHas(false));
+  }, [isDesktop]);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const save = async () => {
+    if (!val.trim()) return;
+    setBusy(true);
+    try {
+      await invoke("save_state", { key: "openai-key", value: JSON.stringify(val.trim()) });
+      setVal(""); setEditing(false); refresh();
+      ctx.toast("Transcription key saved — dropped audio will auto-transcribe");
+    } catch { ctx.toast("Failed to save key"); }
+    setBusy(false);
+  };
+  const clear = async () => {
+    setBusy(true);
+    try { await invoke("save_state", { key: "openai-key", value: "null" }); refresh(); ctx.toast("Transcription key removed"); }
+    catch { ctx.toast("Failed to remove key"); }
+    setBusy(false);
+  };
+
+  if (!isDesktop) return null;
+  return (
+    <div className="nx-set-row" style={{ flexWrap: "wrap" }}>
+      <div className="nx-set-copy">
+        <p className="nx-set-label">Auto-transcription (Whisper)</p>
+        <p className="nx-set-note">
+          {has ? "Connected — dropped audio files transcribe automatically." : "Not set — use a free Groq key (console.groq.com) or an OpenAI key."}
+        </p>
+      </div>
+      {editing ? (
+        <div className="nx-idx-row" style={{ width: "100%", marginTop: 8 }}>
+          <input className="nx-inline nx-inline-wide" type="password" value={val} autoFocus
+            onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => e.key === "Enter" && save()}
+            placeholder="Groq key (gsk_...) or OpenAI key (sk-...)" spellCheck={false} />
+          <button className="nx-chip nx-chip-on" onClick={save} disabled={busy}>Save</button>
+          <button className="nx-chip" onClick={() => { setEditing(false); setVal(""); }}>Cancel</button>
+        </div>
+      ) : (
+        <div className="nx-tool-row">
+          <button className="nx-chip" onClick={() => setEditing(true)}>{has ? "Change" : "Add key"}</button>
+          {has && <button className="nx-chip nx-chip-stop" onClick={clear} disabled={busy}>Remove</button>}
+          <button className="nx-chip" onClick={() => invoke("launch_app", { target: "https://console.groq.com/keys" })}>Get free Groq key</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function VoiceKeybind({ s, set, ctx }) {
   const [capturing, setCapturing] = useState(false);
   useEffect(() => {
@@ -9043,6 +9198,13 @@ function SettingsView({ ctx }) {
         </section>
         )}
 
+        {cat === "ai" && s.schoolMode && (
+          <section className="nx-set-group">
+            <p className="nx-panel-title">AI & Voice</p>
+            <p className="nx-set-note"><Lock size={12} style={{ verticalAlign: "middle" }} /> School mode is on — AI features are hidden. Turn it off in Access & Keys to configure the voice assistant.</p>
+          </section>
+        )}
+
         {cat === "ai" && !s.schoolMode && (
           <section className="nx-set-group">
             <p className="nx-panel-title">Voice assistant</p>
@@ -9077,6 +9239,7 @@ function SettingsView({ ctx }) {
 
             <VoiceKeybind s={s} set={set} ctx={ctx} />
             <ElevenPanel ctx={ctx} />
+            <OpenAIKeyPanel ctx={ctx} />
             <Toggle label="Wake word (“Nexus”)" on={s.wakeWord !== false}
               onChange={(v) => set((p) => ({ ...p, wakeWord: v }))}
               note="Always listens for “Nexus” — say it, then your request. No key to hold." />
@@ -9565,6 +9728,20 @@ const QUOTES = [
   { text: "The best revenge is not to be like your enemy.", who: "Marcus Aurelius", work: "Meditations" },
 ];
 
+/* The window now launches maximized, so the boot sequence needs no window
+   resize at all — the frame expands to 100vw/100vh purely in CSS. This is
+   kept as a belt-and-braces call in case the window was restored down. */
+function expandWindow() {
+  try {
+    const T = window.__TAURI__;
+    const cur = T?.window?.getCurrentWindow?.()
+      ?? T?.window?.getCurrent?.()
+      ?? T?.window?.appWindow
+      ?? null;
+    if (cur?.maximize) { Promise.resolve(cur.maximize()).catch(() => {}); }
+  } catch { /* no-op */ }
+}
+
 const BOOT_LINES = [
   "> nexus core online",
   "> mounting modules ......... ok",
@@ -9574,10 +9751,12 @@ const BOOT_LINES = [
   "> welcome back.",
 ];
 
-function Splash({ onDone }) {
+function Splash({ onDone, onExpand }) {
   const [quote] = useState(() => QUOTES[Math.floor(Math.random() * QUOTES.length)]);
   const [leaving, setLeaving] = useState(false);
   const [step, setStep] = useState(0);
+  const stepRef = useRef(0);
+  stepRef.current = step;
   const [mounted, setMounted] = useState(false);
   const [term, setTerm] = useState("");
   const timers = useRef([]);
@@ -9631,6 +9810,7 @@ function Splash({ onDone }) {
   }, [ac]);
 
   const dismiss = useCallback(() => {
+    if (stepRef.current < 5) return;
     setLeaving((was) => {
       if (was) return was;
       blip(300, 0.2, 0.05, "triangle");
@@ -9641,8 +9821,10 @@ function Splash({ onDone }) {
 
   useEffect(() => {
     const r = requestAnimationFrame(() => setMounted(true));
-    push(() => { setStep(1); sweep(); }, 500);
-    push(() => setStep(2), 1000);
+    push(() => blip(1180, 0.12, 0.035, "sine"), 120);
+    push(() => { setStep(1); blip(1560, 0.09, 0.045, "square"); }, 640);
+    push(() => { setStep(2); sweep(); }, 900);
+    push(() => setStep(3), 1500);
     push(() => {
       const full = BOOT_LINES.join("\n");
       let i = 0;
@@ -9656,11 +9838,13 @@ function Splash({ onDone }) {
         } else {
           blip(523, 0.45, 0.05, "sine");
           push(() => blip(784, 0.5, 0.045, "sine"), 90);
-          push(() => setStep(3), 340);
+          push(() => setStep(4), 280);
+          push(() => { try { if (onExpand) onExpand(); } catch { /* no-op */ } }, 1030);
+          push(() => setStep(5), 1330);
         }
       };
       type();
-    }, 1080);
+    }, 1720);
     return () => { cancelAnimationFrame(r); clearAll(); };
   }, [sweep, blip]);
 
@@ -9677,28 +9861,49 @@ function Splash({ onDone }) {
   useEffect(() => () => { try { audioRef.current?.close(); } catch { /* no-op */ } }, []);
 
   return (
-    <div className={`nx-splash nx-boot-s${step}${mounted ? " nx-boot-live" : ""}${leaving ? " nx-splash-out" : ""}`}
+    <div className={`nx-splash nx-boot-s${step}${mounted ? " nx-boot-live" : ""}${leaving ? " nx-splash-out" : ""}${step >= 5 ? " nx-splash-full" : ""}`}
       onClick={dismiss} role="button" tabIndex={0}
       aria-label={`${quote.text} — ${quote.who}. Continue to Nexus.`}>
       <div className="nx-splash-inner">
-        <div className="nx-boot-frame">
-          <span className="nx-frame-c nx-frame-tl" /><span className="nx-frame-c nx-frame-tr" />
-          <span className="nx-frame-c nx-frame-bl" /><span className="nx-frame-c nx-frame-br" />
-          <div className="nx-boot-grid">
-            <div className="nx-boot-termcol">
-              <div className="nx-term-head">NEXUS CORE · v1.0</div>
-              <pre className="nx-term">{term}<span className="nx-term-cur" /></pre>
-            </div>
-            <div className="nx-boot-orbcol">
-              <div className="nx-boot">
-                <span className="nx-hud-glow" />
-                <span className="nx-hud-ring nx-hud-r1" />
-                <span className="nx-hud-ring nx-hud-r2" />
-                <span className="nx-hud-ring nx-hud-r3" />
-                <span className="nx-hud-ticks" />
-                <span className="nx-hud-sweep" />
-                <span className="nx-hud-reticle" />
-                <span className="nx-hud-core" />
+        <div className="nx-boot-stage">
+          <div className="nx-boot-frame">
+            <span className="nx-boot-wash" />
+            <div className="nx-boot-body">
+              <span className="nx-frame-c nx-frame-tl" /><span className="nx-frame-c nx-frame-tr" />
+              <span className="nx-frame-c nx-frame-bl" /><span className="nx-frame-c nx-frame-br" />
+              <span className="nx-frame-rule" />
+              <span className="nx-frame-nub nx-frame-nub-l" />
+              <span className="nx-frame-nub nx-frame-nub-r" />
+              <span className="nx-frame-tag nx-frame-tag-t">CORE INTERFACE</span>
+              <span className="nx-frame-tag nx-frame-tag-b">ONLINE</span>
+              <div className="nx-boot-grid">
+                <div className="nx-boot-termcol">
+                  <div className="nx-hud-title">N.E.X.U.S<b>V0.1</b></div>
+                  <span className="nx-hud-rule" />
+                  <div className="nx-hud-sub">personal operating layer</div>
+                  <pre className="nx-term">{term}<span className="nx-term-cur" /></pre>
+                  <div className="nx-hud-dim" aria-hidden="true">
+                    <span /><span /><span /><span />
+                  </div>
+                </div>
+                <div className="nx-boot-orbcol">
+                  <div className="nx-boot">
+                    <span className="nx-hud-glow" />
+                    <span className="nx-hud-ring nx-hud-r1" />
+                    <span className="nx-hud-ring nx-hud-r2" />
+                    <span className="nx-hud-ring nx-hud-r3" />
+                    <span className="nx-hud-seg" />
+                    <span className="nx-hud-ticks" />
+                    <span className="nx-hud-sweep" />
+                    <span className="nx-hud-reticle" />
+                    <span className="nx-hud-core" />
+                  </div>
+                </div>
+              </div>
+              <div className="nx-boot-pbar">
+                <div className="nx-boot-pbar-track">
+                  <span className="nx-boot-pbar-fill" />
+                </div>
               </div>
             </div>
           </div>
@@ -10670,6 +10875,7 @@ export default function NexusCore() {
   useEffect(() => {
     if (!settingsReady || splashDecided) return;
     if (settings.splash) setSplash(true);
+    else expandWindow();
     setSplashDecided(true);
   }, [settingsReady, settings.splash, splashDecided]);
 
@@ -10823,6 +11029,10 @@ export default function NexusCore() {
 
   const shownModules = MODULES.filter((m) =>
     !settings.hidden.includes(m.id) && !(settings.schoolMode && AI_MODULES.has(m.id)));
+  useEffect(() => {
+    document.body.classList.toggle("nx-booted", !splash);
+  }, [splash]);
+
   const rootClass = `nx-root${splash ? " nx-asleep" : " nx-woke"}`
     + (settings.motion ? "" : " nx-still")
     + (settings.density === "compact" ? " nx-compact" : "");
@@ -11021,7 +11231,7 @@ export default function NexusCore() {
       <style>{CSS}</style>
       <style>{themeStyle}</style>
 
-      {splash && <Splash onDone={() => setSplash(false)} />}
+      {splash && <Splash onDone={() => setSplash(false)} onExpand={expandWindow} />}
 
       {showTutorial && <Tutorial ctx={ctx} onClose={() => setShowTutorial(false)} />}
       {aboutOpen && <AboutPage ctx={ctx} onClose={() => setAboutOpen(false)} />}
@@ -11158,8 +11368,10 @@ const CSS = `
 
 /* The shell owns the whole page. Without this the host background
    shows through anywhere the app does not reach. */
-html,body{margin:0;padding:0;background:#04060C;}
+html,body{margin:0;padding:0;background:transparent;}
 body{height:100vh;overflow:hidden;}
+/* once the splash is done the shell owns the page again */
+body.nx-booted,body.nx-booted #root{background:#04060C;}
 
 .nx-root{
   --void:#04060C;
@@ -11177,6 +11389,9 @@ body{height:100vh;overflow:hidden;}
     var(--void);
   color:var(--ice); font-family:var(--display); font-weight:300; -webkit-font-smoothing:antialiased;
 }
+/* during the splash the shell paints nothing — the boot frame is the only
+   visible thing, so it appears out of empty space */
+.nx-root.nx-asleep{background:transparent;}
 .nx-root *{box-sizing:border-box;margin:0;}
 .nx-root *{scrollbar-width:thin;scrollbar-color:rgba(159,190,255,0.18) transparent;}
 .nx-root ::-webkit-scrollbar{width:8px;height:8px;}
@@ -12081,7 +12296,7 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 }
 
 /* school */
-.nx-rec{padding:18px;border-radius:16px;border:1px solid var(--edge);
+.nx-rec{position:relative;padding:18px;border-radius:16px;border:1px solid var(--edge);
   background:linear-gradient(160deg,var(--glass),rgba(148,178,255,0.012));
   display:flex;flex-direction:column;gap:13px;}
 .nx-rec-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;}
@@ -12099,6 +12314,30 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-rec-interim{font-size:12.5px;line-height:1.6;color:var(--muted-2);font-style:italic;
   padding:0 2px;}
 .nx-rec-filters{align-items:center;}
+.nx-rec-drop-hot{border-color:var(--signal);background:color-mix(in srgb,var(--signal) 5%,var(--glass));
+  box-shadow:0 0 30px var(--glow-faint);transition:border-color 0.15s,background 0.15s;}
+.nx-rec-drop-overlay{position:absolute;inset:0;border-radius:16px;z-index:10;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;
+  background:color-mix(in srgb,var(--base) 75%,transparent);backdrop-filter:blur(4px);
+  color:var(--signal);pointer-events:none;}
+.nx-rec-drop-overlay p{font-size:15px;font-weight:500;letter-spacing:0.03em;margin:0;}
+.nx-rec-drop-zone{display:flex;align-items:center;justify-content:center;gap:8px;
+  margin-top:8px;padding:10px 16px;border-radius:10px;
+  border:1.5px dashed var(--muted-2);color:var(--muted-2);font-size:12.5px;
+  transition:border-color 0.15s,color 0.15s,background 0.15s;pointer-events:none;}
+.nx-rec-drop-zone-hot{border-color:var(--signal);color:var(--signal);
+  background:color-mix(in srgb,var(--signal) 8%,transparent);}
+.nx-rec-transcribing{display:flex;flex-direction:column;gap:6px;margin-top:8px;
+  padding:10px 16px;border-radius:10px;
+  border:1.5px solid color-mix(in srgb,var(--signal) 30%,transparent);
+  background:color-mix(in srgb,var(--signal) 5%,transparent);}
+.nx-rec-transcribing span{font-size:12px;color:var(--signal);letter-spacing:0.04em;}
+.nx-rec-transcribing-bar{height:3px;border-radius:2px;
+  background:linear-gradient(90deg,transparent 0%,var(--signal) 40%,transparent 100%);
+  background-size:200% 100%;
+  animation:nx-shimmer 1.4s ease-in-out infinite;}
+@keyframes nx-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.nx-rec-audio-preview{align-items:center;gap:10px;margin-top:8px;}
 .nx-search-inline{flex:1;min-width:180px;}
 
 .nx-vnote{border-radius:13px;border:1px solid var(--edge);overflow:hidden;
@@ -12441,87 +12680,161 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 
 /* cold start */
 .nx-splash{position:fixed;inset:0;z-index:200;display:grid;place-items:center;
-  cursor:pointer;padding:8vh 8vw;text-align:center;
-  background:
+  cursor:pointer;padding:0;text-align:center;
+  background:transparent;
+  transition:background 0.7s ease;
+  animation:nx-splash-in .85s cubic-bezier(.2,.7,.3,1) both;}
+/* steps 0-3: nothing but the frame itself is visible */
+.nx-boot-s4,.nx-boot-s5{background:#04060C;}
+.nx-splash-full{background:
     radial-gradient(680px 420px at 50% 34%, var(--glow-faint), transparent 68%),
     radial-gradient(520px 380px at 82% 78%, rgba(142,124,255,0.07), transparent 66%),
-    #04060C;
-  animation:nx-splash-in .85s cubic-bezier(.2,.7,.3,1) both;}
+    #04060C !important;}
 .nx-splash:focus-visible{outline:none;}
 .nx-splash-out{animation:nx-splash-out .62s cubic-bezier(.4,0,.6,1) forwards;}
-.nx-splash-inner{max-width:760px;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;}
-.nx-boot-frame{position:relative;width:680px;max-width:88vw;height:296px;border-radius:14px;
-  border:1px solid var(--glow-soft);overflow:hidden;
-  background:linear-gradient(180deg,rgba(12,20,38,0.55),rgba(6,10,20,0.62));
-  box-shadow:0 0 44px var(--glow-faint),inset 0 0 70px rgba(120,160,255,0.03);
-  opacity:0;clip-path:inset(49.6% 50% 49.6% 50%);
-  transition:clip-path .55s cubic-bezier(.4,0,.2,1),opacity .3s;}
-.nx-boot-live .nx-boot-frame{opacity:1;clip-path:inset(49.6% 0 49.6% 0);}
-.nx-boot-live.nx-boot-s1 .nx-boot-frame,
+.nx-splash-inner{display:grid;place-items:center;width:100%;height:100%;}
+.nx-boot-stage{--pw:min(680px,88vw);--ph:296px;
+  position:relative;width:100%;height:100%;display:grid;place-items:center;
+  grid-row:1;grid-column:1;transition:opacity 0.7s ease;}
+.nx-boot-frame{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  box-sizing:border-box;width:14px;height:14px;border-radius:50%;
+  border:1px solid transparent;overflow:hidden;background:var(--signal);
+  box-shadow:0 0 14px var(--signal),0 0 38px var(--glow),0 0 78px var(--glow-soft);
+  opacity:0;
+  transition:width .26s cubic-bezier(.65,0,.35,1),
+    height .42s cubic-bezier(.5,0,.15,1),
+    border-radius .3s ease,background .55s ease .3s,
+    border-color .4s ease .3s,box-shadow .55s ease,opacity .28s ease;}
+.nx-boot-live .nx-boot-frame{opacity:1;}
+.nx-boot-live.nx-boot-s1 .nx-boot-frame{width:var(--pw);height:3px;border-radius:2px;}
 .nx-boot-live.nx-boot-s2 .nx-boot-frame,
-.nx-boot-live.nx-boot-s3 .nx-boot-frame{clip-path:inset(0 0 0 0);}
-.nx-frame-c{position:absolute;width:15px;height:15px;border:2px solid var(--signal);z-index:3;
-  box-shadow:0 0 8px var(--glow-soft);opacity:0;transition:opacity .4s .2s;}
-.nx-boot-s1 .nx-frame-c,.nx-boot-s2 .nx-frame-c,.nx-boot-s3 .nx-frame-c{opacity:1;}
-.nx-frame-tl{top:9px;left:9px;border-right:none;border-bottom:none;}
-.nx-frame-tr{top:9px;right:9px;border-left:none;border-bottom:none;}
-.nx-frame-bl{bottom:9px;left:9px;border-right:none;border-top:none;}
-.nx-frame-br{bottom:9px;right:9px;border-left:none;border-top:none;}
-.nx-boot-grid{display:grid;grid-template-columns:1fr 300px;height:100%;opacity:0;
-  transition:opacity .45s;}
-.nx-boot-s2 .nx-boot-grid,.nx-boot-s3 .nx-boot-grid{opacity:1;}
-.nx-boot-termcol{padding:22px 24px;display:flex;flex-direction:column;gap:14px;min-width:0;
-  border-right:1px solid var(--edge);text-align:left;}
-.nx-term-head{font-family:var(--mono);font-size:11px;letter-spacing:0.26em;text-transform:uppercase;
-  color:var(--signal);text-shadow:0 0 10px var(--glow-soft);}
-.nx-term{margin:0;font-family:var(--mono);font-size:12.5px;line-height:1.8;color:var(--ice);
-  white-space:pre-wrap;word-break:break-word;text-shadow:0 0 8px var(--glow-faint);}
-.nx-term-cur{display:inline-block;width:8px;height:13px;margin-left:3px;vertical-align:-2px;
+.nx-boot-live.nx-boot-s3 .nx-boot-frame{width:var(--pw);height:var(--ph);border-radius:14px;
+  border-color:var(--signal);
+  background:rgba(4,6,12,0.04);
+  box-shadow:0 0 44px var(--glow-faint),0 0 18px var(--glow-soft),inset 0 0 40px rgba(80,140,255,0.03);}
+.nx-boot-live.nx-boot-s4 .nx-boot-frame{width:100vw;height:100vh;border-radius:0;
+  border-color:var(--glow-soft);background:#04060C;
+  box-shadow:0 0 60px var(--glow-faint);
+  transition:width .8s cubic-bezier(.35,0,.2,1),height .8s cubic-bezier(.35,0,.2,1),
+    border-radius .5s ease,background .6s ease .15s,box-shadow .5s ease,
+    border-color .4s ease .5s,opacity .28s ease !important;}
+.nx-boot-wash{position:absolute;inset:0;z-index:2;pointer-events:none;opacity:0;
+  background:linear-gradient(180deg,rgba(20,96,214,0.30),rgba(9,52,150,0.18));
+  backdrop-filter:blur(2px);
+  box-shadow:inset 0 2px 0 var(--signal),inset 0 -2px 0 var(--signal),
+    0 0 30px var(--glow);
+  transition:opacity .5s ease;}
+.nx-boot-s2 .nx-boot-wash{opacity:1;}
+.nx-boot-s3 .nx-boot-wash,.nx-boot-s4 .nx-boot-wash{opacity:0;}
+.nx-boot-body{position:absolute;left:0;top:50%;transform:translateY(-50%);z-index:3;
+  width:var(--pw);height:var(--ph);opacity:0;transition:opacity .5s ease;}
+.nx-boot-s3 .nx-boot-body{opacity:1;}
+.nx-boot-s4 .nx-boot-body{opacity:0;transition:opacity .25s ease;}
+.nx-frame-c{position:absolute;width:16px;height:16px;border:1.5px solid var(--signal);z-index:4;
+  box-shadow:0 0 8px var(--glow-soft);}
+.nx-frame-tl{top:8px;left:8px;border-right:none;border-bottom:none;border-top-left-radius:8px;}
+.nx-frame-tr{top:8px;right:8px;border-left:none;border-bottom:none;border-top-right-radius:8px;}
+.nx-frame-bl{bottom:8px;left:8px;border-right:none;border-top:none;border-bottom-left-radius:8px;}
+.nx-frame-br{bottom:8px;right:8px;border-left:none;border-top:none;border-bottom-right-radius:8px;}
+.nx-frame-rule{position:absolute;top:4px;left:50%;transform:translateX(-50%);z-index:4;
+  width:150px;height:6px;opacity:.75;
+  background:repeating-linear-gradient(90deg,var(--signal) 0 1px,transparent 1px 9px);}
+.nx-frame-nub{position:absolute;top:50%;transform:translateY(-50%);z-index:4;
+  width:4px;height:26px;background:var(--signal);box-shadow:0 0 10px var(--signal);}
+.nx-frame-nub-l{left:2px;border-radius:0 3px 3px 0;}
+.nx-frame-nub-r{right:2px;border-radius:3px 0 0 3px;}
+.nx-frame-tag{position:absolute;left:50%;transform:translateX(-50%);z-index:4;
+  font-family:var(--mono);font-size:7.5px;letter-spacing:0.34em;color:var(--signal);
+  opacity:.7;text-transform:uppercase;white-space:nowrap;}
+.nx-frame-tag-t{top:12px;}
+.nx-frame-tag-b{bottom:5px;}
+.nx-boot-grid{display:grid;grid-template-columns:1fr 272px;height:100%;}
+.nx-boot-termcol{padding:26px 22px 22px 30px;display:flex;flex-direction:column;gap:7px;
+  min-width:0;text-align:left;}
+.nx-hud-title{display:flex;align-items:baseline;gap:18px;font-size:23px;font-weight:600;
+  letter-spacing:0.26em;color:#e2f7ff;line-height:1;
+  text-shadow:0 0 10px var(--signal),0 0 28px var(--glow);}
+.nx-hud-title b{font-weight:600;font-size:19px;letter-spacing:0.1em;color:var(--signal);}
+.nx-hud-rule{display:block;width:132px;height:2px;background:var(--signal);
+  box-shadow:0 0 10px var(--signal);opacity:.9;}
+.nx-hud-sub{font-family:var(--mono);font-size:8px;letter-spacing:0.3em;text-transform:uppercase;
+  color:var(--signal);opacity:.8;margin-bottom:6px;}
+.nx-hud-dim{display:flex;flex-direction:column;gap:9px;margin-top:auto;padding-bottom:4px;}
+.nx-hud-dim span{height:5px;border-radius:2px;background:var(--glow-soft);opacity:.28;}
+.nx-hud-dim span:nth-child(1){width:58%;}
+.nx-hud-dim span:nth-child(2){width:41%;margin-left:18px;}
+.nx-hud-dim span:nth-child(3){width:33%;margin-left:18px;}
+.nx-hud-dim span:nth-child(4){width:48%;}
+.nx-boot-termcol .nx-term{display:block;flex:0 1 auto;margin:0;font-family:var(--mono);
+  font-size:10px;line-height:1.72;color:#9fe8ff;white-space:pre-wrap;word-break:break-word;
+  text-shadow:0 0 8px var(--glow-soft);}
+.nx-term-cur{display:inline-block;width:6px;height:10px;margin-left:3px;vertical-align:-1px;
   background:var(--signal);box-shadow:0 0 8px var(--signal);animation:nx-cur 1s steps(1) infinite;}
 .nx-boot-orbcol{display:grid;place-items:center;}
 .nx-boot-reveal{display:flex;flex-direction:column;align-items:center;opacity:0;
-  transform:translateY(12px);transition:opacity .7s,transform .7s;}
-.nx-boot-s3 .nx-boot-reveal{opacity:1;transform:none;}
+  transform:translateY(12px);transition:opacity .7s .1s,transform .7s .1s;
+  grid-row:1;grid-column:1;pointer-events:none;
+  max-width:760px;width:100%;z-index:1;}
+.nx-boot-s4 .nx-boot-reveal,.nx-boot-s5 .nx-boot-reveal{opacity:1;transform:none;}
+.nx-boot-s5 .nx-boot-reveal{pointer-events:auto;}
+.nx-boot-s4 .nx-boot-stage{pointer-events:none;}
+.nx-boot-s5 .nx-boot-stage{display:none;}
 @keyframes nx-cur{0%,50%{opacity:1;}50.01%,100%{opacity:0;}}
 @media (max-width:720px){
-  .nx-boot-frame{height:260px;}
   .nx-boot-grid{grid-template-columns:1fr;}
   .nx-boot-orbcol{display:none;}
 }
-.nx-boot{position:relative;width:250px;height:250px;display:grid;place-items:center;}
-.nx-hud-glow{position:absolute;width:250px;height:250px;border-radius:50%;
+.nx-boot{position:relative;width:236px;height:236px;display:grid;place-items:center;}
+.nx-hud-glow{position:absolute;width:236px;height:236px;border-radius:50%;
   background:radial-gradient(circle,var(--glow),var(--glow-faint) 45%,transparent 70%);
-  filter:blur(3px);animation:nx-hud-fade 1.2s ease both,nx-breathe 4s ease-in-out 1.3s infinite;}
+  filter:blur(3px);opacity:0;}
 .nx-hud-ring{position:absolute;inset:0;margin:auto;border-radius:50%;
-  border:1.5px solid var(--glow-soft);
+  border:1.5px solid var(--glow-soft);opacity:0;
   box-shadow:0 0 10px var(--glow-faint),inset 0 0 14px var(--glow-faint);}
-.nx-hud-r1{width:72px;height:72px;border-top-color:var(--signal);border-right-color:var(--signal);
-  animation:nx-hud-draw .9s .05s ease both,nx-spin-cw 9s linear 1s infinite;}
-.nx-hud-r2{width:150px;height:150px;border-bottom-color:var(--signal);border-left-color:var(--signal);
-  animation:nx-hud-draw 1s .12s ease both,nx-spin-ccw 16s linear 1.1s infinite;}
-.nx-hud-r3{width:224px;height:224px;border-top-color:var(--signal);
-  animation:nx-hud-draw 1.1s .2s ease both,nx-spin-cw 26s linear 1.2s infinite;}
-.nx-hud-ticks{position:absolute;inset:0;margin:auto;width:190px;height:190px;border-radius:50%;
+.nx-hud-r1{width:68px;height:68px;border-top-color:var(--signal);border-right-color:var(--signal);}
+.nx-hud-r2{width:132px;height:132px;border-bottom-color:var(--signal);border-left-color:var(--signal);}
+.nx-hud-r3{width:196px;height:196px;border-top-color:var(--signal);}
+.nx-hud-seg{position:absolute;inset:0;margin:auto;width:164px;height:164px;border-radius:50%;
+  opacity:0;
+  background:repeating-conic-gradient(from 0deg,var(--signal) 0deg 7deg,transparent 7deg 22deg);
+  -webkit-mask:radial-gradient(circle,transparent 76px,#000 76px,#000 82px,transparent 82px);
+          mask:radial-gradient(circle,transparent 76px,#000 76px,#000 82px,transparent 82px);}
+.nx-hud-ticks{position:absolute;inset:0;margin:auto;width:176px;height:176px;border-radius:50%;
+  opacity:0;
   background:repeating-conic-gradient(from 0deg,var(--glow-soft) 0deg 0.6deg,transparent 0.6deg 6deg);
-  -webkit-mask:radial-gradient(circle,transparent 90px,#000 90px,#000 95px,transparent 95px);
-          mask:radial-gradient(circle,transparent 90px,#000 90px,#000 95px,transparent 95px);
-  animation:nx-hud-draw 1s .3s ease both,nx-spin-ccw 44s linear 1.3s infinite;}
-.nx-hud-sweep{position:absolute;inset:0;margin:auto;width:150px;height:150px;border-radius:50%;
+  -webkit-mask:radial-gradient(circle,transparent 83px,#000 83px,#000 88px,transparent 88px);
+          mask:radial-gradient(circle,transparent 83px,#000 83px,#000 88px,transparent 88px);}
+.nx-hud-sweep{position:absolute;inset:0;margin:auto;width:132px;height:132px;border-radius:50%;
+  opacity:0;
   background:conic-gradient(from 0deg,transparent 0deg,var(--glow-faint) 42deg,var(--glow) 76deg,transparent 80deg);
-  -webkit-mask:radial-gradient(circle,#000 74px,transparent 75px);
-          mask:radial-gradient(circle,#000 74px,transparent 75px);
-  animation:nx-hud-fade 1s .5s ease both,nx-spin-cw 3.6s linear 1.1s infinite;}
-.nx-hud-reticle{position:absolute;inset:0;margin:auto;width:224px;height:224px;
+  -webkit-mask:radial-gradient(circle,#000 65px,transparent 66px);
+          mask:radial-gradient(circle,#000 65px,transparent 66px);}
+.nx-hud-reticle{position:absolute;inset:0;margin:auto;width:196px;height:196px;opacity:0;
   background:
     linear-gradient(var(--glow-soft),var(--glow-soft)) center/1px 100% no-repeat,
     linear-gradient(var(--glow-soft),var(--glow-soft)) center/100% 1px no-repeat;
-  -webkit-mask:radial-gradient(circle,transparent 40px,#000 42px,#000 108px,transparent 112px);
-          mask:radial-gradient(circle,transparent 40px,#000 42px,#000 108px,transparent 112px);
+  -webkit-mask:radial-gradient(circle,transparent 36px,#000 38px,#000 94px,transparent 98px);
+          mask:radial-gradient(circle,transparent 36px,#000 38px,#000 94px,transparent 98px);}
+.nx-hud-core{position:absolute;width:34px;height:34px;border-radius:50%;opacity:0;
+  background:radial-gradient(circle,#ffffff 12%,var(--signal) 42%,rgba(0,0,0,0) 72%);
+  box-shadow:0 0 26px var(--signal),0 0 62px var(--glow),0 0 110px var(--glow-soft);}
+.nx-boot-s3 .nx-hud-glow,.nx-boot-s4 .nx-hud-glow{
+  animation:nx-hud-fade 1.2s ease both,nx-breathe 4s ease-in-out 1.3s infinite;}
+.nx-boot-s3 .nx-hud-r1,.nx-boot-s4 .nx-hud-r1{
+  animation:nx-hud-draw .9s .05s ease both,nx-spin-cw 9s linear 1s infinite;}
+.nx-boot-s3 .nx-hud-r2,.nx-boot-s4 .nx-hud-r2{
+  animation:nx-hud-draw 1s .12s ease both,nx-spin-ccw 16s linear 1.1s infinite;}
+.nx-boot-s3 .nx-hud-r3,.nx-boot-s4 .nx-hud-r3{
+  animation:nx-hud-draw 1.1s .2s ease both,nx-spin-cw 26s linear 1.2s infinite;}
+.nx-boot-s3 .nx-hud-seg,.nx-boot-s4 .nx-hud-seg{
+  animation:nx-hud-draw 1s .26s ease both,nx-spin-cw 19s linear 1.2s infinite;}
+.nx-boot-s3 .nx-hud-ticks,.nx-boot-s4 .nx-hud-ticks{
+  animation:nx-hud-draw 1s .3s ease both,nx-spin-ccw 44s linear 1.3s infinite;}
+.nx-boot-s3 .nx-hud-sweep,.nx-boot-s4 .nx-hud-sweep{
+  animation:nx-hud-fade 1s .5s ease both,nx-spin-cw 3.6s linear 1.1s infinite;}
+.nx-boot-s3 .nx-hud-reticle,.nx-boot-s4 .nx-hud-reticle{
   animation:nx-hud-fade 1.1s .55s ease both;}
-.nx-hud-core{position:absolute;width:14px;height:14px;border-radius:50%;
-  background:radial-gradient(circle,#ffffff,var(--signal) 58%,var(--signal));
-  box-shadow:0 0 18px var(--signal),0 0 46px var(--glow),0 0 90px var(--glow-soft);
+.nx-boot-s3 .nx-hud-core,.nx-boot-s4 .nx-hud-core{
   animation:nx-hud-core 1s .1s cubic-bezier(.2,.8,.2,1) both;}
 .nx-boot-word{margin-top:26px;font-size:clamp(26px,5vw,54px);font-weight:200;
   letter-spacing:0.55em;text-indent:0.55em;color:var(--ice);
@@ -12547,11 +12860,26 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
   color:var(--muted);animation:nx-rise-soft 1.1s .44s cubic-bezier(.2,.7,.3,1) both;}
 .nx-splash-who em{font-style:normal;letter-spacing:0.14em;color:var(--muted-2);
   padding-left:12px;border-left:1px solid var(--edge);}
+/* the hint must not appear until the quote is actually up (step 5) */
 .nx-splash-hint{position:absolute;bottom:6vh;left:0;right:0;font-family:var(--mono);
   font-size:9.5px;letter-spacing:0.24em;text-transform:uppercase;color:var(--muted-2);
-  opacity:0;transition:opacity .8s;}
-.nx-boot-s3 .nx-splash-hint{opacity:0.75;transition-delay:.5s;}
-.nx-asleep .nx-sidebar,.nx-asleep .nx-main{opacity:0;}
+  opacity:0;visibility:hidden;transition:opacity .8s;}
+.nx-boot-s5 .nx-splash-hint{opacity:0.75;visibility:visible;transition-delay:.3s;}
+.nx-boot-pbar{position:absolute;bottom:20px;left:26px;right:26px;z-index:5;
+  opacity:0;transition:opacity .35s ease;}
+.nx-boot-s3 .nx-boot-pbar{opacity:1;}
+.nx-boot-pbar-track{height:2px;background:rgba(100,160,255,0.1);border-radius:2px;overflow:hidden;
+  border:1px solid rgba(100,160,255,0.12);}
+.nx-boot-pbar-fill{display:block;height:100%;width:0%;border-radius:2px;
+  background:linear-gradient(90deg,var(--glow-soft),var(--signal));
+  box-shadow:0 0 8px var(--signal),0 0 14px var(--glow);}
+.nx-boot-s3 .nx-boot-pbar-fill,.nx-boot-s4 .nx-boot-pbar-fill{
+  animation:nx-pbar 4.8s 0.2s linear forwards;}
+@keyframes nx-pbar{from{width:0%;}to{width:100%;}}
+/* the shell must be fully gone during the splash — the boot frame is the
+   only thing on screen. visibility (not opacity) so reduced-motion and
+   other overrides can't bring it back. */
+.nx-asleep .nx-sidebar,.nx-asleep .nx-main{visibility:hidden;opacity:0;}
 .nx-woke .nx-sidebar,.nx-woke .nx-main{animation:nx-wake .75s .1s cubic-bezier(.2,.7,.3,1) both;}
 
 @keyframes nx-splash-in{from{opacity:0;}to{opacity:1;}}
@@ -13195,8 +13523,8 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 
 .nx-still *{animation:none!important;transition:none!important;}
 @media (prefers-reduced-motion:reduce){
-  .nx-root *{animation:none!important;transition:none!important;}
-  .nx-asleep .nx-sidebar,.nx-asleep .nx-main{opacity:1;}
-  .nx-splash-hint{opacity:0.75;}
+  /* the boot sequence keeps its transitions — it is the app's entry point
+     and reducing it to nothing leaves a blank window */
+  .nx-root *:not(.nx-splash):not(.nx-splash *){animation:none!important;transition:none!important;}
 }
 `;
