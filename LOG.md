@@ -4,6 +4,38 @@ One entry per work session. Two minutes at the end of each session — date, hou
 
 Be honest in here. "Spent 3 hours and got nowhere, cause was X" is more valuable than a clean narrative, both for grading and for you in February.
 
+2026-08-18 - Merge recovery + JARVIS boot sequence (~2h)
+
+Did:
+
+Found the working tree had been hand-copied over from a cloud session that branched at c023e67, silently reverting the wake word and splash boot sequence committed in c48161a and 90e1671. Recovered with a three-way merge instead of committing the regression. One conflict in the Settings AI & Voice tab, resolved by keeping both children. Restored the CHECKLIST section the same copy had truncated.
+
+Rebuilt the launch animation against a real reference clip. The open is a CRT switch-on: a dot, stretching horizontally into a line, then opening vertically into the panel, blue wash fading off as the HUD resolves. Window now starts unmaximized and centered, and maximizes when the boot finishes, so the app no longer slams open fullscreen.
+
+Broke / learned:
+
+Never hand-copy a whole source file into the repo - NexusCore.jsx is one 13k-line file, so a whole-file copy reverts anything the copy did not know about. Use a patch or a branch.
+
+Verified the animation by rendering the real CSS in a headless browser and stepping through frames, rather than guessing at it. Three previous attempts were built blind and all missed.
+
+2026-08-19 - Boot sequence finish + cross-machine reconcile (~2h)
+
+Did:
+
+Finished the launch animation to spec: dot, horizontal stretch, vertical open into a bordered panel, HUD loads inside it, then the panel expands to fill the screen while the quote resolves in the same motion. Added a step 5 so the quote is only dismissable once it is actually up. Window launches maximized, decorations off, transparent, so the dot appears over empty space with no chrome or backing panel around it. Added an inline background to index.html to kill the WebView2 white flash before React mounts.
+
+Reconciled this machine against the D: copy from the other PC. Every Rust file and every other module is byte-identical once CRLF noise is ignored; the only real deltas were the splash section, two doc files, and dragDropEnabled. Pulled dragDropEnabled: false across - the drag-drop audio import has been dead since it landed, because Tauri v2 native file-drop swallows the webview drop events unless it is off.
+
+Broke / learned:
+
+tauri.conf.json changes never hot reload. Several rounds of "nothing changed" were just the dev server holding the old config; it needs a full restart every time.
+
+Debugged the animation by pulling 96 frames out of a screen recording with ffmpeg and reading them as contact sheets. Five separate problems were visible in one pass that had taken several blind rounds to half-find: the window never maximizing, a white flash, a visible backing box, the hint text showing during boot, and a long black startup delay.
+
+A prefers-reduced-motion block was setting .nx-asleep .nx-sidebar back to opacity 1 and forcing the hint visible, so with reduce-motion on the dashboard bled through the splash. Reduced-motion overrides that un-hide things are a trap; the boot sequence now keeps its transitions and the shell hides with visibility, not opacity.
+
+Uncommitted feature work moved between machines by hand-copying NexusCore.jsx again - audio drop, Whisper/Groq transcription, OpenAI key panel. None of it was ever on GitHub. Committing and pushing it this time.
+
 2026-08-10 — Project scoping (planning session, ~1h)
 
 Did:

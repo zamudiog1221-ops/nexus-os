@@ -75,7 +75,7 @@ NexusOS runs as a bootable Linux drive — one graded module taken to real, meas
 
 ## Lightbulbs / polish (later)
 - [x] Fix wrong widget values: round trip now measures real latency (pings the gateway every 6s); temp is hidden when the OS exposes no sensor instead of showing a fake 0. NOTE: reading real CPU temp on Windows needs a hardware-monitor dependency (LibreHardwareMonitor/WMI, often admin) — deferred; hiding is the honest display for now.
-- [ ] Jarvis-style launch animation: opens small and spreads outward on app start (Gio to send a reference)
+- [x] Jarvis-style launch animation: splash boot sequence - dot stretches to a line, opens into the HUD frame, arc-reactor orb and terminal type out, then the panel expands to fullscreen as the quote resolves
 
 ## Open — next session (priority order)
 - [ ] FIX Ubuntu VM boot (PC 2): EFI lost the ubuntu entry ("No bootable device", only PXE shows). Use EFI Shell: FS0: / cd EFI\ubuntu / shimx64.efi. Then permanent: copy shimx64.efi to /boot/efi/EFI/BOOT/BOOTX64.EFI. If no shell, boot ISO → Try Ubuntu → boot-repair.
@@ -84,4 +84,4 @@ NexusOS runs as a bootable Linux drive — one graded module taken to real, meas
 - [ ] Wire more modules to the assistant: Networking actions, Voice Notes, Automation, Files-open, Projects (pattern: add to ASSISTANT_TOOLS + handler)
 - [x] Drop Voice Notes transcripts/summaries into the Files module — done by reading the shared voice-notes store (simpler + always in sync than the event bus); shows with a "Voice Notes" source badge, searchable + summarizable
 - [ ] Dead-code cleanup: remove unused WidgetCell + orbit-era grid CSS
-- [ ] Push all local commits to GitHub
+- [x] Push all local commits to GitHub
