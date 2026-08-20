@@ -9439,7 +9439,7 @@ const DEFAULT_SETTINGS = {
   motion: true, splash: true, ask: true,
   sound: true, volume: 1, hover: false, hidden: [],
   schoolMode: false, schoolKey: "Alt+S",
-  voiceKey: "t", voiceSpeak: true, voiceGender: "female", wakeWord: false,
+  voiceKey: "t", voiceSpeak: true, voiceGender: "female", wakeWord: true,
   userName: "", greetVoice: true, launchCount: 0, tutorialSeen: false,
 };
 
@@ -9731,14 +9731,35 @@ const QUOTES = [
 /* The window now launches maximized, so the boot sequence needs no window
    resize at all — the frame expands to 100vw/100vh purely in CSS. This is
    kept as a belt-and-braces call in case the window was restored down. */
-function expandWindow() {
+function tauriWindow() {
   try {
     const T = window.__TAURI__;
-    const cur = T?.window?.getCurrentWindow?.()
+    return T?.window?.getCurrentWindow?.()
       ?? T?.window?.getCurrent?.()
       ?? T?.window?.appWindow
       ?? null;
+  } catch { return null; }
+}
+
+/* The window now launches maximized, so the boot sequence needs no window
+   resize at all - the frame expands to 100vw/100vh purely in CSS. This is
+   kept as a belt-and-braces call in case the window was restored down. */
+function expandWindow() {
+  try {
+    const cur = tauriWindow();
     if (cur?.maximize) { Promise.resolve(cur.maximize()).catch(() => {}); }
+  } catch { /* no-op */ }
+}
+
+/* The window starts hidden so the host never paints a white frame before the
+   webview has content. Reveal it only after React has actually painted. */
+function revealWindow() {
+  try {
+    const cur = tauriWindow();
+    if (!cur?.show) return;
+    Promise.resolve(cur.show())
+      .then(() => { try { cur.setFocus?.(); } catch { /* no-op */ } })
+      .catch(() => {});
   } catch { /* no-op */ }
 }
 
@@ -9838,7 +9859,7 @@ function Splash({ onDone, onExpand }) {
         } else {
           blip(523, 0.45, 0.05, "sine");
           push(() => blip(784, 0.5, 0.045, "sine"), 90);
-          push(() => setStep(4), 280);
+          push(() => { setStep(4); document.body.classList.add("nx-booted"); }, 280);
           push(() => { try { if (onExpand) onExpand(); } catch { /* no-op */ } }, 1030);
           push(() => setStep(5), 1330);
         }
@@ -10203,6 +10224,7 @@ function VoiceOverlay({ ctx, settings }) {
           system: buildSystemPrompt(ctx.t, ctx.online, ctx.launchApps) +
             " You are being spoken to by voice — keep replies to one or two short sentences a person would want read aloud. Speak in plain words only: NEVER use markdown, asterisks, hashes, bullet points, LaTeX, or symbols like $ or \\. Say math in words a person would speak, e.g. 'negative cosine of y equals three x plus C'. The conversation may continue, so treat short follow-ups like 'yes', 'do it', or 'another one' as referring to what was just discussed.",
           messages: convoRef.current, tools: ASSISTANT_TOOLS, raw: true, maxTokens: 800,
+          model: "claude-haiku-4-5-20251001",
           signal: ac.signal,
         });
         if (ac.signal.aborted) { setPhase("idle"); return; }
@@ -10291,7 +10313,7 @@ function VoiceOverlay({ ctx, settings }) {
       setHeard((fin + interim).trim());
       gotSpeech = true;
       clearTimeout(silenceRef.current);
-      silenceRef.current = setTimeout(finish, 1600); // ~1.6s of quiet ends the answer
+      silenceRef.current = setTimeout(finish,450);
     };
     rec.onend = () => { if (autoListeningRef.current) { try { rec.start(); } catch { /* race */ } } };
     rec.onerror = (ev) => { if (ev && ev.error === "not-allowed") { autoListeningRef.current = false; setPhase("idle"); } };
@@ -10879,6 +10901,28 @@ export default function NexusCore() {
     setSplashDecided(true);
   }, [settingsReady, settings.splash, splashDecided]);
 
+  /* The window is created hidden so the host cannot paint a white frame before
+     the webview has content. Reveal once React has painted. The timeout is a
+     hard floor: if settings never resolve the window must still appear, or the
+     app looks like it failed to launch. */
+  const shown = useRef(false);
+  useEffect(() => {
+    const reveal = () => { if (!shown.current) { shown.current = true; revealWindow(); } };
+    const bail = setTimeout(reveal, 2500);
+    let r2 = 0;
+    const r1 = requestAnimationFrame(() => { r2 = requestAnimationFrame(reveal); });
+    return () => { clearTimeout(bail); cancelAnimationFrame(r1); cancelAnimationFrame(r2); };
+  }, []);
+
+  const wakeMigrated = useRef(false);
+  useEffect(() => {
+    if (!settingsReady || wakeMigrated.current) return;
+    wakeMigrated.current = true;
+    if (settings.wakeOptIn !== true) {
+      setSettings((p) => ({ ...p, wakeWord: true, wakeOptIn: true }));
+    }
+  }, [settingsReady, settings.wakeOptIn, setSettings]);
+
   const [keyState, setKeyState] = useState("checking");
   const [onboard, setOnboard] = useState("welcome");
   const [showTutorial, setShowTutorial] = useState(false);
@@ -11030,7 +11074,7 @@ export default function NexusCore() {
   const shownModules = MODULES.filter((m) =>
     !settings.hidden.includes(m.id) && !(settings.schoolMode && AI_MODULES.has(m.id)));
   useEffect(() => {
-    document.body.classList.toggle("nx-booted", !splash);
+    if (!splash) document.body.classList.add("nx-booted");
   }, [splash]);
 
   const rootClass = `nx-root${splash ? " nx-asleep" : " nx-woke"}`
@@ -12710,8 +12754,8 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
 .nx-boot-live.nx-boot-s2 .nx-boot-frame,
 .nx-boot-live.nx-boot-s3 .nx-boot-frame{width:var(--pw);height:var(--ph);border-radius:14px;
   border-color:var(--signal);
-  background:rgba(4,6,12,0.04);
-  box-shadow:0 0 44px var(--glow-faint),0 0 18px var(--glow-soft),inset 0 0 40px rgba(80,140,255,0.03);}
+  background:rgba(4,6,12,0.82);
+  box-shadow:0 0 44px var(--glow-faint),0 0 18px var(--glow-soft),inset 0 0 40px rgba(80,140,255,0.05);}
 .nx-boot-live.nx-boot-s4 .nx-boot-frame{width:100vw;height:100vh;border-radius:0;
   border-color:var(--glow-soft);background:#04060C;
   box-shadow:0 0 60px var(--glow-faint);
@@ -12719,7 +12763,7 @@ body[data-tut-highlight="assistant"] .nx-nav[data-module="assistant"] svg{color:
     border-radius .5s ease,background .6s ease .15s,box-shadow .5s ease,
     border-color .4s ease .5s,opacity .28s ease !important;}
 .nx-boot-wash{position:absolute;inset:0;z-index:2;pointer-events:none;opacity:0;
-  background:linear-gradient(180deg,rgba(20,96,214,0.30),rgba(9,52,150,0.18));
+  background:linear-gradient(180deg,rgba(20,96,214,0.62),rgba(9,52,150,0.52));
   backdrop-filter:blur(2px);
   box-shadow:inset 0 2px 0 var(--signal),inset 0 -2px 0 var(--signal),
     0 0 30px var(--glow);

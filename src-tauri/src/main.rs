@@ -983,6 +983,15 @@ async fn call_model(app: tauri::AppHandle, payload: ModelCall) -> Result<String,
 fn main() {
     let sys = System::new_all();
     tauri::Builder::default()
+        .setup(|app| {
+            let w = app.get_webview_window("main").unwrap();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(1200));
+                let _ = w.show();
+                let _ = w.set_focus();
+            });
+            Ok(())
+        })
         .plugin(tauri_plugin_notification::init())
         .manage(Telemetry {
             sys: Mutex::new(sys),
